@@ -1,0 +1,22 @@
+# for golang project
+
+config/env.yaml
+keys/
+.env
+*.log
+vendor/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+.idea/
+.vscode/
+.DS_Store
+coverage/
+*.prof
+build/
+tmp/
