@@ -179,11 +179,10 @@ func (q *Queries) GetMonitorByID(ctx context.Context, id pgtype.UUID) (GetMonito
 	return i, err
 }
 
-const updateMonitorStatus = `-- name: UpdateMonitorStatus :one
+const updateMonitorStatus = `-- name: UpdateMonitorStatus :execrows
 UPDATE monitors
 SET enabled = $2
 WHERE id = $1 AND user_id = $3
-RETURNING enabled
 `
 
 type UpdateMonitorStatusParams struct {
@@ -192,9 +191,10 @@ type UpdateMonitorStatusParams struct {
 	UserID  pgtype.UUID
 }
 
-func (q *Queries) UpdateMonitorStatus(ctx context.Context, arg UpdateMonitorStatusParams) (bool, error) {
-	row := q.db.QueryRow(ctx, updateMonitorStatus, arg.ID, arg.Enabled, arg.UserID)
-	var enabled bool
-	err := row.Scan(&enabled)
-	return enabled, err
+func (q *Queries) UpdateMonitorStatus(ctx context.Context, arg UpdateMonitorStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateMonitorStatus, arg.ID, arg.Enabled, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

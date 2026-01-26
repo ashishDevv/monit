@@ -3,87 +3,106 @@ package user
 import (
 	"context"
 	"project-k/internals/security"
+	"project-k/pkg/apperror"
 
 	"github.com/google/uuid"
 )
 
 type Service struct {
 	repo *repository
+	tokenSvc *security.TokenService
 }
 
-func NewService(repo *repository) *Service {
+func NewService(repo *repository, tokenSvc *security.TokenService) *Service {
 	return &Service{
 		repo: repo,
+		tokenSvc: tokenSvc,
 	}
 }
 
 func (s *Service) Register(ctx context.Context, data CreateUserCmd) (uuid.UUID, error) {
 
-	//check if another user with same email
-	// if there , return
-	// if not then create a user and return it
-
-	_, err := s.repo.GetUserByEmail(ctx, data.Email)
+	// hash the password
+	hashedPassword, err := security.HashPassword(data.PasswordHash)
 	if err != nil {
 		return uuid.UUID{}, err
 	}
 
-	// hash the password
-	passwordHash, err := security.HashPassword(data.PasswordHash)
-	if err != nil {
-		return 
-	}
+	data.PasswordHash = hashedPassword
 
-	data.PasswordHash = passwordHash
 	id, err := s.repo.CreateUser(ctx, data)
 	if err != nil {
 		return uuid.UUID{}, nil
 	}
-
 	return id, nil
 }
 
-func (s *Service) LogIn(ctx context.Context, data LogInUserCmd) (uuid.UUID, error) {
-
-	// first check if user present
-		// get user by email, if not got error
-	// now compare password , if not match error
-	// now create a jwt token 
-	// send it to user
+func (s *Service) LogIn(ctx context.Context, data LogInUserCmd) (LogInUserResult, error) {
+	const op string = "service.user.login"
 
 	u, err := s.repo.GetUserByEmail(ctx, data.Email)
 	if err != nil {
-		return uuid.UUID{}, err
+		if apperror.IsKind(err, apperror.NotFound) {   // if user not found err, dont return not found, hacker know it
+			return LogInUserResult{}, &apperror.Error{
+				Kind:    apperror.Unauthorised,
+				Op:      op,
+				Message: "incorrect email or password",
+			}
+		}
+		return LogInUserResult{}, err // if some other err
 	}
 
-	// hash the password
-	passwordHash, err := security.HashPassword(data.PasswordHash)
+	ok, err := security.ComparePassword(data.Password, u.PasswordHash)
+	if err != nil || !ok {
+		return LogInUserResult{}, &apperror.Error{
+			Kind:    apperror.Unauthorised,
+			Op:      op,
+			Message: "incorrect email or password",
+		}
+	}
+	payload := security.RequestClaims{
+		UserID: u.ID.String(),
+		Email: u.Email,
+	}
+
+	// generate JWT Token with 30 min expiry (as it is just basics)
+	token, err :=  s.tokenSvc.GenerateAccessToken(payload)// sceret , expiry is there in token service, we just pass payload
 	if err != nil {
-		return 
+		return LogInUserResult{}, &apperror.Error{
+			Kind: apperror.Internal,
+			Op: op,
+			Message: "internal server error",
+			Err: err,
+		}
 	}
 
-	if u.PasswordHash != passwordHash {
-		return // err
+	res := LogInUserResult{
+		UserID:      u.ID,
+		AccessToken: token,
 	}
-
-	// make a method in security package for generate JWT token
-
-	return // token
+	return res, nil
 }
-
 
 func (s *Service) GetProfile(ctx context.Context, userId uuid.UUID) (User, error) {
-	return s.repo.GetUserByID(ctx, userId)
+	
+	u, err := s.repo.GetUserByID(ctx, userId)
+	if err != nil {
+		return User{}, err
+	}
+	return u, nil
 }
 
-
-func (r *Service) GetUserByID(ctx context.Context, userID uuid.UUID) (User, error) {
+func (s *Service) GetUserByID(ctx context.Context, userID uuid.UUID) (User, error) {
 
 	// const op string = "service.user.get_user_by_id"
 
-	dbUser, err := r.repo.GetUserByID(ctx, userID)
+	dbUser, err := s.repo.GetUserByID(ctx, userID)
 	if err != nil {
 		return User{}, err
 	}
 	return dbUser, nil
+}
+
+func (s *Service) IncrementMonitorCount(ctx context.Context, userID uuid.UUID) error {
+	return s.repo.IncrementMonitorCount(ctx, userID)
 }

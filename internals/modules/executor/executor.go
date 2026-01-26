@@ -11,21 +11,32 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 type MonitorService interface {
-	GetMonitor(context.Context, uuid.UUID) (*monitor.MonitorRecord, error)
+	LoadMonitor(context.Context, uuid.UUID) (monitor.Monitor, error)
 }
 
 type Executor struct {
+	// lifecycle
 	ctx         context.Context
 	workerCount int
+
+	// channels
 	jobChan     chan scheduler.JobPayload
 	resultChan  chan HTTPResult
+
+	// services
 	monitorSvc  MonitorService
+
+	// http goroutines config
 	httpSem     chan struct{}
 	httpWg      sync.WaitGroup
 	httpClient  *http.Client
+
+	// misc
+	logger      *zerolog.Logger
 }
 
 func NewExecutor(
@@ -34,18 +45,22 @@ func NewExecutor(
 	jobChan chan scheduler.JobPayload,
 	resultChan chan HTTPResult,
 	monitorSvc MonitorService,
+	logger *zerolog.Logger,
 ) *Executor {
 
 	return &Executor{
 		ctx:         ctx,
 		workerCount: workerCount,
 		jobChan:     jobChan,
+		resultChan:  resultChan,
 		monitorSvc:  monitorSvc,
-		httpSem:     make(chan struct{}, 5000),   // 5k http concurent
+		httpSem:     make(chan struct{}, 5000), // 5k http concurent
 		httpClient:  newHttpClient(),
+		logger:      logger,
 	}
 }
 
+// StartWorkers starts the Executor workers
 func (ew *Executor) StartWorkers() {
 	for range ew.workerCount {
 		go ew.startWork()
@@ -56,13 +71,14 @@ func (ew *Executor) startWork() {
 
 	for job := range ew.jobChan {
 		// load monitor
-		monitor, err := ew.monitorSvc.GetMonitor(ew.ctx, job.MonitorID)
-		if err != nil {
+		monitor, err := ew.monitorSvc.LoadMonitor(ew.ctx, job.MonitorID)
+		if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
 			//log it
+			ew.logger.Error().Err(err).Msg("error in loading monitor in executor")
 			return
 		}
-		if monitor == nil || monitor.Disabled {
-			return   // we not have to do this further
+		if !monitor.Enabled { // monitor is disabled, so dont proceed further
+			return // we not have to do this further
 		}
 
 		// acquire http semaphore
@@ -81,7 +97,12 @@ func (ew *Executor) startWork() {
 	}
 }
 
-func (ew *Executor) executeHTTPCheck(monitor *monitor.MonitorRecord) HTTPResult {
+// Stop waits for all workers and http gourotines to complete
+func (ew *Executor) Stop() {
+	ew.httpWg.Wait()
+}
+
+func (ew *Executor) executeHTTPCheck(monitor monitor.Monitor) HTTPResult {
 
 	start := time.Now()
 
@@ -128,7 +149,7 @@ func (ew *Executor) executeHTTPCheck(monitor *monitor.MonitorRecord) HTTPResult 
 
 	defer resp.Body.Close()
 
-	success := resp.StatusCode == monitor.ExpectedStatus && latency <= int64(monitor.LatencyThresholdMS)
+	success := resp.StatusCode == int(monitor.ExpectedStatus) && latency <= int64(monitor.LatencyThresholdMs)
 
 	return HTTPResult{
 		MonitorID: monitor.ID,
@@ -141,7 +162,7 @@ func (ew *Executor) executeHTTPCheck(monitor *monitor.MonitorRecord) HTTPResult 
 	}
 }
 
-func (ew *Executor) classifyError(err error) (string, bool) {
+func (_ *Executor) classifyError(err error) (string, bool) {
 
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "TIMEOUT", true

@@ -36,8 +36,7 @@ ORDER BY updated_at
 LIMIT $2
 OFFSET $3;
 
--- name: UpdateMonitorStatus :one
+-- name: UpdateMonitorStatus :execrows
 UPDATE monitors
 SET enabled = $2
-WHERE id = $1 AND user_id = $3
-RETURNING enabled;
+WHERE id = $1 AND user_id = $3;

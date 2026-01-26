@@ -2,13 +2,13 @@ package logger
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"project-k/config"
 	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func Init(cfg *config.Config) *zerolog.Logger {

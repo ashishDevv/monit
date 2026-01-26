@@ -20,6 +20,11 @@ type CreateUserCmd struct {
 }
 
 type LogInUserCmd struct {
-	Email        string
-	PasswordHash string
+	Email    string
+	Password string
+}
+
+type LogInUserResult struct {
+	UserID      uuid.UUID
+	AccessToken string
 }

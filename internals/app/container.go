@@ -26,18 +26,22 @@ type Container struct {
 	userHandler    *user.Handler
 	monitorHandler *monitor.Handler
 	authMW         *middle.AuthMiddleware
-	scheduler      *scheduler.Scheduler
-	executor       *executor.Executor
-	resultPro      *result.ResultProcessor
-	alertSvc       *alert.AlertService
+	Scheduler      *scheduler.Scheduler
+	Executor       *executor.Executor
+	ResultPro      *result.ResultProcessor
+	AlertSvc       *alert.AlertService
+	JobChan        chan scheduler.JobPayload
+	ResultChan     chan executor.HTTPResult
+	AlertChan      chan alert.AlertEvent
 }
 
 func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, logger *zerolog.Logger) (*Container, error) {
 
-	redisClient, err := redisstore.New(cfg.RedisCfg)
+	redisClient, err := redisstore.New(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
 	if err != nil {
 		return nil, err
 	}
+	tokenSvc := security.NewTokenService(cfg.Auth)
 
 	jobChan := make(chan scheduler.JobPayload, 1000)
 	resultChan := make(chan executor.HTTPResult, 1000)
@@ -45,44 +49,62 @@ func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, log
 
 	validator := validator.New()
 
-	monitorRepo := monitor.NewRepository()
-	incidentRepo := result.NewIncidentRepository()
-	userRepo := user.NewRepository(db)
+	monitorRepo := monitor.NewRepository(db, logger)
+	incidentRepo := result.NewMonitorIncidentRepo(db)
+	userRepo := user.NewRepository(db, logger)
 
-	userService := user.NewService(userRepo)
-	monitorSvc := monitor.NewService(monitorRepo)
+	userService := user.NewService(userRepo, tokenSvc)
+	monitorSvc := monitor.NewService(monitorRepo, redisClient, userService, logger)
 
-	sch := scheduler.NewScheduler(ctx, jobChan, redisClient)
-	exec := executor.NewExecutor(ctx, 100, jobChan, resultChan, monitorSvc)
-	resultPro := result.NewResultProcessor(ctx, redisClient, resultChan, incidentRepo, monitorSvc, alertChan)
-	alertSvc := alert.NewAlertService(50, alertChan)
+	sch := scheduler.NewScheduler(ctx, jobChan, redisClient, logger)
+	exec := executor.NewExecutor(ctx, 100, jobChan, resultChan, monitorSvc, logger)
+	resultPro := result.NewResultProcessor(ctx, redisClient, resultChan, incidentRepo, monitorSvc, alertChan, logger)
+	alertSvc := alert.NewAlertService(50, alertChan, logger)
 
-	tokenSvc, err := security.NewTokenService(cfg.Auth)
-	if err != nil {
-		return nil, err
-	}
-
-	monitorHandler := monitor.NewHandler(monitorSvc, validator)
-	userHandler := user.NewHandler(userService, validator)
+	monitorHandler := monitor.NewHandler(monitorSvc, validator, logger)
+	userHandler := user.NewHandler(userService, validator, logger)
 
 	authMW := middle.NewAuthMiddleware(tokenSvc)
 
 	return &Container{
 		DB:             db,
 		Logger:         logger,
+		RedisClient:    redisClient,
 		userSvc:        userService,
 		userHandler:    userHandler,
 		authMW:         authMW,
 		monitorHandler: monitorHandler,
-		scheduler:      sch,
-		executor:       exec,
-		resultPro:      resultPro,
-		alertSvc:       alertSvc,
+		Scheduler:      sch,
+		Executor:       exec,
+		ResultPro:      resultPro,
+		AlertSvc:       alertSvc,
+		JobChan:        jobChan,
+		ResultChan:     resultChan,
+		AlertChan:      alertChan,
 	}, nil
 }
 
-func (c *Container) Shutdown(ctx context.Context) error {
-	// 3. Close DB pool
+func (c *Container) Shutdown() error {
+
+	close(c.JobChan)
+
+	c.Executor.Stop()
+
+	close(c.ResultChan)
+
+	c.ResultPro.WorkersClosingWait()
+
+	close(c.AlertChan)
+
+	c.AlertSvc.WorkerClosingWait()
+
+	// close redis
+	err := c.RedisClient.Close()
+	if err != nil {
+		return  err
+	}
+
+	// Close DB pool
 	if c.DB != nil {
 		c.DB.Close()
 	}

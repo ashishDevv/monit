@@ -46,13 +46,18 @@ func main() {
 	}
 	log.Info().Msg("dependencies initialized")
 
-	// Start Consumer  -> Runs in a seperate goroutines in background
-	app.StartConsumer(ctx, container)
-	if err != nil {
-		log.Fatal().Msgf("failed to initialize consumer : %v", err)
-	}
+	// start our heros
+	// start scheduler
+	container.Scheduler.StartScheduler()
+	// start executor
+	container.Executor.StartWorkers()
+	// start result processor
+	container.ResultPro.StartResultProcessor()
+	// start alert service
+	container.AlertSvc.Start()
 
-	log.Info().Msg("consumer initialized")
+	// all heros are initialized
+	log.Info().Msg("all heros initialized")
 
 	// Register Routes
 	router := app.RegisterRoutes(container)
@@ -73,10 +78,10 @@ func main() {
 	}
 
 	// 2. Shutdown background workers & infra
-	shutdownCtx, cancle := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
+	_, cancle := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
 	defer cancle()
 
-	if err := container.Shutdown(shutdownCtx); err != nil {
+	if err := container.Shutdown(); err != nil {
 		log.Error().Err(err).Msg("dependecies shutdown failed")
 	}
 

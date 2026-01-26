@@ -7,6 +7,8 @@ import (
 )
 
 func (rp *ResultProcessor) failureWorker() {
+	defer rp.workerWG.Done()
+
 	for r := range rp.failureChan {
 		rp.handleFailure(r)
 	}
@@ -15,10 +17,15 @@ func (rp *ResultProcessor) failureWorker() {
 func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 	ctx := rp.ctx
 
-	monitor, err := rp.monitorSvc.GetMonitor(ctx, r.MonitorID)
-	if err != nil || monitor.Disabled {
+	monitor, err := rp.monitorSvc.LoadMonitor(ctx, r.MonitorID)
+	if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
+		//log it
 		rp.cleanupRedis(ctx, r.MonitorID)
 		return
+	}
+	if !monitor.Enabled { // monitor is disabled, so dont proceed further
+		rp.cleanupRedis(ctx, r.MonitorID)
+		return // we not have to do this further
 	}
 
 	// --- RETRY PATH ---
@@ -45,8 +52,8 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 		alerted, _ := rp.redisSvc.GetIncidentAlerted(ctx, r.MonitorID)
 		if !alerted {
 			rp.alertChan <- alert.AlertEvent{MonitorID: r.MonitorID}
-			rp.redisSvc.MarkIncidentAlerted(ctx, r.MonitorID)
-			rp.incidentRepo.CreateIncident(ctx, r)
+			_ = rp.redisSvc.MarkIncidentAlerted(ctx, r.MonitorID)
+			rp.incidentRepo.Create(ctx, r)
 		}
 	}
 
@@ -54,5 +61,6 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 	nextRun := time.Now().Add(time.Duration(monitor.IntervalSec) * time.Second)
 	if err := rp.redisSvc.Schedule(ctx, r.MonitorID.String(), nextRun); err != nil {
 		// log it
+		rp.logger.Error().Err(err).Msg("error in scheduling monitor")
 	}
 }

@@ -52,5 +52,3 @@ func GetHTTPStatus(kind Kind) int {
 		return http.StatusInternalServerError
 	}
 }
-
-
