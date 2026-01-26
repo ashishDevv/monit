@@ -6,13 +6,12 @@ import (
 	"runtime/debug"
 )
 
-
 type Error struct {
-	Kind Kind       // To make errors understandable 
-	Op string       // <layer>.<domain>.<action>
-	Err error       // wraped error
-	Message string  // client safe and frindly message
-	Stack []byte    // stack traces
+	Kind    Kind   // To make errors understandable
+	Op      string // <layer>.<domain>.<action>
+	Err     error  // wraped error
+	Message string // client safe and frindly message
+	Stack   []byte // stack traces
 }
 
 // Error implements the built-in error interface

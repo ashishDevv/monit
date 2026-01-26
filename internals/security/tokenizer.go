@@ -1,59 +1,39 @@
 package security
 
 import (
-	"crypto/rsa"
-	"os"
 	"project-k/config"
 	"project-k/pkg/apperror"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 type TokenService struct {
-	publicKey *rsa.PublicKey
+	secret    string
+	expiryMin int
 }
 
-func NewTokenService(secretCfg *config.AuthConfig) (*TokenService, error) {
-	publicKey, err := loadPublicKey(secretCfg.PublicKeyPath)
-	if err != nil {
-		// log it here
-		return nil, err
-	}
-
+func NewTokenService(authCfg *config.AuthConfig) *TokenService {
 	return &TokenService{
-		publicKey: publicKey,
-	}, nil
+		secret:    authCfg.Secret,
+		expiryMin: authCfg.ExpiryMin,
+	}
 }
 
-func loadPublicKey(path string) (*rsa.PublicKey, error) {
-	const op string = "service.token.load_public_key"
+func (ts *TokenService) GenerateAccessToken(payload RequestClaims) (string, error) {
+	now := time.Now()
+	expiryTime := now.Add(time.Duration(ts.expiryMin) * time.Minute)
 
-	// use if any problem came
-	// make path relative to executable if not absolute
-	// if !filepath.IsAbs(path) {
-	// 	exePath, _ := os.Getwd()  // current working directory
-	// 	path = filepath.Join(exePath, path)
-	// }
+	payload.ExpiresAt = jwt.NewNumericDate(expiryTime)
+	payload.IssuedAt = jwt.NewNumericDate(now)
 
-	data, err := os.ReadFile(path)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, payload)
+	signedToken, err := token.SignedString([]byte(ts.secret))
 	if err != nil {
-		return nil, &apperror.Error{
-			Kind:    apperror.Internal,
-			Op:      op,
-			Message: "error in loading token public key from file path",
-			Err:     err,
-		}
+		return "", err
 	}
-	publicKey, err := jwt.ParseRSAPublicKeyFromPEM(data)
-	if err != nil {
-		return nil, &apperror.Error{
-			Kind:    apperror.Internal,
-			Op:      op,
-			Message: "error in parsing token public key",
-			Err:     err,
-		}
-	}
-	return publicKey, nil
+
+	return signedToken, nil
 }
 
 func (ts *TokenService) ValidateAccessToken(accessToken string) (*RequestClaims, error) {
@@ -61,17 +41,23 @@ func (ts *TokenService) ValidateAccessToken(accessToken string) (*RequestClaims,
 
 	claims := &RequestClaims{}
 
-	token, err := jwt.ParseWithClaims(accessToken, claims, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, jwt.ErrSignatureInvalid
-		}
-		return ts.publicKey, nil
-	})
+	token, err := jwt.ParseWithClaims(
+		accessToken,
+		claims,
+		func(t *jwt.Token) (any, error) {
+			if t.Method != jwt.SigningMethodHS256 {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(ts.secret), nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
+	)
+
 	if err != nil || !token.Valid {
 		return nil, &apperror.Error{
-			Kind:    apperror.Unauthorised,
-			Op:      op,
-			Message: "invalid access token",
+			Kind: apperror.Unauthorised,
+			Op: op,
+			Message: "invalid token",
 		}
 	}
 

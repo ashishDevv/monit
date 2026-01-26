@@ -15,15 +15,20 @@
     - [x] write svc layer 
     - [x] write handler 
     - [x] connect routes
+    - [ ] complete monitor inicident methods as well
     - [ ] write just imp middleware and simple auth (access token logic)
 
-- [ ] connect all in container and router
+- [x] connect all in container and router
 
-- [ ] write down main func
+- [x] write down main func
 
-- [ ] write gracefull shutdown
+- [x] write gracefull shutdown
+
+- [x] Do proper error handling and logging now
 
 - [ ] now test all - locally
+
+
 
 - [ ] write down docker file, test it in docker compose (3 instances, redis, postgres)
 

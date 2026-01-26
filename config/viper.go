@@ -15,7 +15,7 @@ func LoadConfig(path string) *Config {
 	// Set defaults
 	v.SetDefault("port", 3000)
 	v.SetDefault("env", "development")
-	v.SetDefault("rabbitmq.worker_count", 10)
+	// v.SetDefault("rabbitmq.worker_count", 10)
 	v.SetDefault("service_name", "cosmic-user-service")
 
 	// Env overrides
@@ -36,12 +36,12 @@ func LoadConfig(path string) *Config {
 		log.Fatal("DB_URL is required")
 	}
 
-	if cfg.Auth == nil || cfg.Auth.PublicKeyPath == "" {
-		log.Fatal("AUTH_PUBLIC_KEY_PATH is required")
+	if cfg.Auth == nil || cfg.Auth.Secret == "" || cfg.Auth.ExpiryMin == 0 {
+		log.Fatal("Auth config required is required")
 	}
 	
-	if cfg.RabbitMQ == nil {
-		log.Fatal("RabbitMQ configrations are required")
+	if cfg.Redis == nil {
+		log.Fatal("Redis configrations are required")
 	}
 
 	return &cfg

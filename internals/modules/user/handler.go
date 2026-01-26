@@ -10,32 +10,37 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 type Handler struct {
 	service   *Service
 	validator *validator.Validate
+	logger    *zerolog.Logger
 }
 
-func NewHandler(service *Service, validator *validator.Validate) *Handler {
+func NewHandler(service *Service, validator *validator.Validate, logger *zerolog.Logger) *Handler {
 	return &Handler{
 		service:   service,
 		validator: validator,
+		logger:    logger,
 	}
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	const op string = "handler.user.register"
+
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
 
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.Kind(apperror.InvalidInput), "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
 		return
 	}
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.Kind(apperror.InvalidInput), "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
 		return
 	}
 
@@ -45,6 +50,12 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: req.Password,
 	})
 	if err != nil {
+		h.logger.Error().
+			Str("op", op).
+			Str("req_id", reqID).
+			Err(err).
+			Msg("registration error")
+		utils.FromAppError(w, reqID, err)
 		return
 	}
 
@@ -52,32 +63,44 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
+	const op string = "handler.user.login"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
 
 	var req LogInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.Kind(apperror.InvalidInput), "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
 		return
 	}
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.Kind(apperror.InvalidInput), "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
 		return
 	}
 
-	token, err := h.service.LogIn(ctx, LogInUserCmd{
-		Email:        req.Email,
-		PasswordHash: req.Password,
+	res, err := h.service.LogIn(ctx, LogInUserCmd{
+		Email:    req.Email,
+		Password: req.Password,
 	})
 	if err != nil {
+		h.logger.Error().
+			Str("op", op).
+			Str("req_id", reqID).
+			Err(err).
+			Msg("login error")
+		utils.FromAppError(w, reqID, err)
 		return
 	}
+	result := LogInResponse{
+		UserID:      res.UserID.String(),
+		AccessToken: res.AccessToken,
+	}
 
-	utils.WriteJSON(w, http.StatusCreated, "user registered", token)
+	utils.WriteJSON(w, http.StatusCreated, "user registered", result)
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	const op string = "handler.user.get_profile"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
 
@@ -94,6 +117,12 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.service.GetProfile(ctx, userID)
 	if err != nil {
+		h.logger.Error().
+			Str("op", op).
+			Str("req_id", reqID).
+			Err(err).
+			Msg("login error")
+		utils.FromAppError(w, reqID, err)
 		return
 	}
 	u := GetProfileResponse{
@@ -105,46 +134,4 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.WriteJSON(w, http.StatusOK, "profile retrived", u)
-}
-
-func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	reqID := middleware.GetReqID(ctx)
-	reqClaims, ok := middle.UserFromContext(ctx)
-	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
-		return
-	}
-
-	pathUserID := r.PathValue("userID")
-
-	if reqClaims.UserID == "" || pathUserID == "" {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
-	}
-
-	claimUserID := reqClaims.UserID // this is source of truth
-
-	pathUserUUID, err := uuid.Parse(pathUserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
-		return
-	}
-
-	claimUserUUID, err := uuid.Parse(claimUserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
-		return
-	}
-
-	if pathUserUUID != claimUserUUID {
-		utils.WriteError(w, http.StatusForbidden, reqID, apperror.Forbidden, "")
-		return
-	}
-
-	user, err := h.service.GetUserByID(ctx, claimUserUUID)
-	if err != nil {
-		utils.FromAppError(w, reqID, err)
-	}
-
-	utils.WriteJSON(w, http.StatusOK, "Retrived User", user)
 }

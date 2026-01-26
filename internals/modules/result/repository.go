@@ -20,7 +20,7 @@ func NewMonitorIncidentRepo(dbExecutor db.DBTX) *IncidentRepository {
 }
 
 func (r *IncidentRepository) Create(ctx context.Context, r executor.HTTPResult) {
-
+	
 }
 
 func (r *IncidentRepository) Get(ctx context.Context, incidentID uuid.UUID) (MonitorIncident, error) {

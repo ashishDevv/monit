@@ -84,13 +84,16 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (GetUserByIDR
 	return i, err
 }
 
-const incrementMonitorCount = `-- name: IncrementMonitorCount :exec
+const incrementMonitorCount = `-- name: IncrementMonitorCount :execrows
 UPDATE users
-SET monitors_count = monitors_count + 1
-WHERE id = $1
+SET monitor_count = monitor_count + 1
+WHERE id = $1 AND monitor_count < 10
 `
 
-func (q *Queries) IncrementMonitorCount(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, incrementMonitorCount, id)
-	return err
+func (q *Queries) IncrementMonitorCount(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, incrementMonitorCount, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

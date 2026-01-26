@@ -37,6 +37,10 @@ func New(addr, password string, db int) (*Client, error) {
 	return &Client{rdb: rdb}, nil
 }
 
+func (c *Client) Close() error {
+	return c.rdb.Close()
+}
+
 // func (r *Redis) GetAndRemoveMonitors(ctx context.Context, key string, batchSize int) ([]redis.Z, error) {
 // 	val, err := r.redisClient.ZPopMin(ctx, key, int64(batchSize)).Result()
 // 	if err != nil {

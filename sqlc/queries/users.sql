@@ -13,7 +13,7 @@ SELECT id, name, email, password_hash
 FROM users
 WHERE email = $1;
 
--- name: IncrementMonitorCount :exec
+-- name: IncrementMonitorCount :execrows
 UPDATE users
-SET monitors_count = monitors_count + 1
-WHERE id = $1;
+SET monitor_count = monitor_count + 1
+WHERE id = $1 AND monitor_count < 10;

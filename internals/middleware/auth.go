@@ -48,7 +48,7 @@ func (a *AuthMiddleware) Handle(next http.Handler) http.Handler {
 		}
 
 		// Extra safety checks (optional but recommended)
-		if claims.UserID == "" || claims.Email == "" || claims.Role == "" || claims.Status == "" {
+		if claims.UserID == "" || claims.Email == "" {
 			utils.WriteError(w, http.StatusUnauthorized, "", apperror.Unauthorised, "user is unauhorised")
 			return
 		}
@@ -58,7 +58,7 @@ func (a *AuthMiddleware) Handle(next http.Handler) http.Handler {
 	})
 }
 
-func (a *AuthMiddleware) extractBearerToken(r *http.Request) (string, error) {
+func (_ *AuthMiddleware) extractBearerToken(r *http.Request) (string, error) {
 	authHeader := r.Header.Get("Authorization")
 
 	if authHeader == "" {

@@ -2,27 +2,39 @@ package result
 
 import (
 	"context"
+	"sync"
 
 	"project-k/internals/modules/alert"
 	"project-k/internals/modules/executor"
 	"project-k/internals/modules/monitor"
 	"project-k/pkg/redisstore"
+
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 type MonitorService interface {
-	GetMonitor(context.Context, uuid.UUID) (*monitor.MonitorRecord, error)
+	LoadMonitor(context.Context, uuid.UUID) (monitor.Monitor, error)
 }
 
 type ResultProcessor struct {
-	ctx          context.Context
+	// lifecycle
+	ctx      context.Context
+	workerWG sync.WaitGroup
+
+	// services
 	redisSvc     *redisstore.Client
-	resultChan   chan executor.HTTPResult
-	successChan  chan executor.HTTPResult
-	failureChan  chan executor.HTTPResult
-	alertChan    chan alert.AlertEvent
-	incidentRepo *IncidentRepository
 	monitorSvc   MonitorService
+	incidentRepo *IncidentRepository
+
+	// channels
+	resultChan  chan executor.HTTPResult
+	successChan chan executor.HTTPResult
+	failureChan chan executor.HTTPResult
+	alertChan   chan alert.AlertEvent
+
+	// misc
+	logger *zerolog.Logger
 }
 
 func NewResultProcessor(
@@ -32,6 +44,7 @@ func NewResultProcessor(
 	incidentRepo *IncidentRepository,
 	monitorSvc MonitorService,
 	alertChan chan alert.AlertEvent,
+	logger *zerolog.Logger,
 ) *ResultProcessor {
 	return &ResultProcessor{
 		ctx:          ctx,
@@ -42,13 +55,17 @@ func NewResultProcessor(
 		alertChan:    alertChan,
 		successChan:  make(chan executor.HTTPResult, 50),
 		failureChan:  make(chan executor.HTTPResult, 5),
+		logger:       logger,
 	}
 }
 
+// StartResultProcessor starts the Result Processor
 func (rp *ResultProcessor) StartResultProcessor() {
 
 	// first
 	// start success and failure workers
+	rp.workerWG.Add(55) // add for all as we have to wait for each worker to complete
+
 	for range 50 {
 		go rp.successWorker()
 	}
@@ -73,6 +90,11 @@ func (rp *ResultProcessor) router() {
 	// closing success and failure channel
 	close(rp.failureChan)
 	close(rp.successChan)
+}
+
+// WorkersClosingWait waits for all workers to complete
+func (rp *ResultProcessor) WorkersClosingWait() {
+	rp.workerWG.Wait()
 }
 
 func (rp *ResultProcessor) cleanupRedis(ctx context.Context, monitorID uuid.UUID) {
