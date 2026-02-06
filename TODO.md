@@ -16,7 +16,7 @@
     - [x] write handler 
     - [x] connect routes
     - [ ] complete monitor inicident methods as well
-    - [ ] write just imp middleware and simple auth (access token logic)
+    - [x] write just imp middleware and simple auth (access token logic)
 
 - [x] connect all in container and router
 

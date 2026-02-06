@@ -61,8 +61,8 @@ func NewExecutor(
 }
 
 // StartWorkers starts the Executor workers
-func (ew *Executor) StartWorkers() {
-	for range ew.workerCount {
+func (ew *Executor) StartWorkers() {    
+	for range ew.workerCount {     // 100  , -> 5mb
 		go ew.startWork()
 	}
 }
