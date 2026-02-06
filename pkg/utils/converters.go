@@ -46,14 +46,14 @@ func FromPgBool(b pgtype.Bool) bool {
 	return b.Bool
 }
 
-func FromPgTimestamptz(ts pgtype.Timestamptz) (time.Time, bool) {
+func FromPgTimestamptz(ts pgtype.Timestamptz) time.Time {
 	if !ts.Valid {
-		return time.Time{}, false
+		return time.Time{}
 	}
 	if ts.InfinityModifier != pgtype.Finite {
-		return time.Time{}, false
+		return time.Time{}
 	}
-	return ts.Time, true
+	return ts.Time
 }
 
 // func ToPgTimestamptz(time.Time) pgtype.Timestamptz {

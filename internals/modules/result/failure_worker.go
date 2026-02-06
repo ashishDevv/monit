@@ -53,7 +53,9 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 		if !alerted {
 			rp.alertChan <- alert.AlertEvent{MonitorID: r.MonitorID}
 			_ = rp.redisSvc.MarkIncidentAlerted(ctx, r.MonitorID)
-			rp.incidentRepo.Create(ctx, r)
+			if err := rp.incidentRepo.Create(ctx, time.Now(), r); err != nil {
+				
+			}
 		}
 	}
 

@@ -20,11 +20,11 @@ func (rp *ResultProcessor) handleSuccess(r executor.HTTPResult) {
 	monitor, err := rp.monitorSvc.LoadMonitor(ctx, r.MonitorID)
 	if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
 		rp.logger.Error().Err(err).Msg("error in loading monitor in result processor worker")
-		rp.cleanupRedis(ctx, r.MonitorID)
+		// rp.cleanupRedis(ctx, r.MonitorID)
 		return
 	}
 	if !monitor.Enabled { // monitor is disabled, so dont proceed further
-		rp.cleanupRedis(ctx, r.MonitorID)
+		// rp.cleanupRedis(ctx, r.MonitorID)
 		return // we not have to do this further
 	}
 

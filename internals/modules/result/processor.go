@@ -25,7 +25,7 @@ type ResultProcessor struct {
 	// services
 	redisSvc     *redisstore.Client
 	monitorSvc   MonitorService
-	incidentRepo *IncidentRepository
+	incidentRepo *MonitorIncidentRepository
 
 	// channels
 	resultChan  chan executor.HTTPResult
@@ -41,7 +41,7 @@ func NewResultProcessor(
 	ctx context.Context,
 	redisSvc *redisstore.Client,
 	resultChan chan executor.HTTPResult,
-	incidentRepo *IncidentRepository,
+	incidentRepo *MonitorIncidentRepository,
 	monitorSvc MonitorService,
 	alertChan chan alert.AlertEvent,
 	logger *zerolog.Logger,

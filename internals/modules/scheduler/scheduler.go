@@ -61,7 +61,7 @@ func (sc *Scheduler) StartScheduler() {
 
 			case <-ticker.C:
 				// pull jobs from redis
-				sc.doWork()
+				sc.doWork()   // 400 ms
 			}
 		}
 	}()
@@ -70,7 +70,7 @@ func (sc *Scheduler) StartScheduler() {
 func (sc *Scheduler) doWork() {
 	now := time.Now().Unix()
 
-	items, err := sc.redisSvc.PopDue(sc.ctx, sc.batchSize)
+	items, err := sc.redisSvc.PopDue(sc.ctx, sc.batchSize)  // 5000,  pr => 95%,  100 non valid
 	if err != nil {
 		// transient redis error → log & move on
 		sc.logger.Error().Err(err).Msg("error to pop scheduled monitors from redis")
@@ -123,7 +123,7 @@ func (sc *Scheduler) doWork() {
 		}
 
 		select {
-		case sc.jobChan <- JobPayload{MonitorID: id}:
+		case sc.jobChan <- JobPayload{MonitorID: id}: // has space 
 			// success
 		case <-sc.ctx.Done():
 			return
