@@ -7,11 +7,13 @@ import (
 )
 
 type HTTPResult struct {
-	MonitorID uuid.UUID
-	Status    int
-	LatencyMs int64
-	Success   bool
-	Reason    string
-	Retryable bool
-	CheckedAt time.Time
+	MonitorID   uuid.UUID
+	Success     bool
+	Status      int
+	LatencyMs   int64
+	Reason      string
+	Retryable   bool
+	CheckedAt   time.Time
+	IntervalSec int32
+	AlertEmail  string
 }

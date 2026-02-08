@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"project-k/internals/modules/monitor"
 	"project-k/internals/modules/scheduler"
+	"project-k/pkg/apperror"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 type MonitorService interface {
 	LoadMonitor(context.Context, uuid.UUID) (monitor.Monitor, error)
+	ScheduleMonitor(context.Context, uuid.UUID, int32, string)
 }
 
 type Executor struct {
@@ -71,10 +73,17 @@ func (ew *Executor) startWork() {
 
 	for job := range ew.jobChan {
 		// load monitor
-		monitor, err := ew.monitorSvc.LoadMonitor(ew.ctx, job.MonitorID)
+		monitor, err := ew.monitorSvc.LoadMonitor(ew.ctx, job.MonitorID)  
 		if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
-			//log it
-			ew.logger.Error().Err(err).Msg("error in loading monitor in executor")
+			// if err == not found -> simply return as monitor is deleted
+			if apperror.IsKind(err, apperror.NotFound) {
+				return
+			}
+			// if err anything else -> it critical
+			// IT SHOULD BE RE-SCHEDULE 
+			// log it 
+			ew.monitorSvc.ScheduleMonitor(ew.ctx, job.MonitorID, 5, "executor.start_work")
+			ew.logger.Error().Err(err).Str("monitor_id", job.MonitorID.String()).Msg("error in loading monitor in executor")
 			return
 		}
 		if !monitor.Enabled { // monitor is disabled, so dont proceed further
@@ -111,12 +120,20 @@ func (ew *Executor) executeHTTPCheck(monitor monitor.Monitor) HTTPResult {
 
 	req, err := http.NewRequestWithContext(httpReqCtx, "GET", monitor.Url, nil)
 	if err != nil {
-		// this is our server failure, that request cant able to build, because we have validated the client url at the start, when he registered
-		// So it deserve re-scheduling again
+		// this is request building error -> means url is wrong, 
+		// so its clients problem, we should handle it seperately in result processor, 
+		// and add this in DB/redis (so client get to know about this), and DO NOT RE-SCHEDULE IT
+		// log it as well as that we can see it
+		ew.logger.Error().
+			Err(err).
+			Str("monitor_id", monitor.ID.String()).
+			Str("monitor_url", monitor.Url).
+			Msg("error in building request")
+		
 		return HTTPResult{
 			MonitorID: monitor.ID,
 			Success:   false,
-			Reason:    "INVALID_REQUEST",
+			Reason:    "INVALID_REQUEST",  // check with this in result processor
 			Retryable: false,
 			CheckedAt: time.Now(),
 		}
@@ -141,7 +158,6 @@ func (ew *Executor) executeHTTPCheck(monitor monitor.Monitor) HTTPResult {
 			- request building err -> its our err, log it as well as it will remain after retry as well
 			- network err/timeout -> maybe network is slow
 			- TLS timeout err
-			- retry count < 3
 		-	When not Retry
 			- DNS failure  -> its due to bad config -> log it
 			- retry count >= 3  // log it VERY IMPORTANT, in future put it in a seperate error channel for debugging
@@ -170,9 +186,7 @@ func (_ *Executor) classifyError(err error) (string, bool) {
 
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		// return "DNS_FAILURE", false   // log this error , its our server config mistake
-		// dont return , just log it
-		return "", true
+		return "DNS_FAILURE", false 
 	}
 
 	var netErr net.Error

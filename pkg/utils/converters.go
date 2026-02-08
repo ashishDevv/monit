@@ -56,6 +56,9 @@ func FromPgTimestamptz(ts pgtype.Timestamptz) time.Time {
 	return ts.Time
 }
 
-// func ToPgTimestamptz(time.Time) pgtype.Timestamptz {
-
-// }
+func ToPgTimestamptz(time time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{
+		Time: time,
+		Valid: true,
+	}
+}

@@ -76,7 +76,7 @@ func (c *Client) MarkIncidentAlerted(ctx context.Context, monitorID uuid.UUID) e
 
 func (c *Client) GetIncidentAlerted(ctx context.Context, monitorID uuid.UUID) (bool, error) {
 	key := fmt.Sprintf("monitor:incident:%v", monitorID)
-	
+
 	resp, err := c.rdb.HGet(ctx, key, "alerted").Result()
 	if err != nil {
 		return false, err
@@ -96,4 +96,18 @@ func (c *Client) GetIncident(ctx context.Context, monitorID uuid.UUID) (map[stri
 		return nil, nil
 	}
 	return resp, err
-} 
+}
+
+func (c *Client) ClearIncidentIfExists(ctx context.Context, monitorID uuid.UUID) (bool, error) {
+	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+
+	var n int64
+
+	err := retry(ctx, 2, func() error {
+		var err error
+		n, err = c.rdb.Del(ctx, key).Result()
+		return err
+	})
+
+	return n == 1, err
+}
