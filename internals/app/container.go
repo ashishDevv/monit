@@ -50,7 +50,7 @@ func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, log
 	validator := validator.New()
 
 	monitorRepo := monitor.NewRepository(db, logger)
-	incidentRepo := result.NewMonitorIncidentRepo(db)
+	incidentRepo := result.NewMonitorIncidentRepo(db, logger)
 	userRepo := user.NewRepository(db, logger)
 
 	userService := user.NewService(userRepo, tokenSvc)

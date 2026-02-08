@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const closeMonitorIncident = `-- name: CloseMonitorIncident :execrows
+UPDATE monitor_incidents
+SET end_time = $2
+WHERE monitor_id = $1 AND end_time IS NULL
+`
+
+type CloseMonitorIncidentParams struct {
+	MonitorID pgtype.UUID
+	EndTime   pgtype.Timestamptz
+}
+
+func (q *Queries) CloseMonitorIncident(ctx context.Context, arg CloseMonitorIncidentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, closeMonitorIncident, arg.MonitorID, arg.EndTime)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createMonitorIncident = `-- name: CreateMonitorIncident :exec
 INSERT INTO monitor_incidents (monitor_id, start_time, alerted, http_status, latency_ms)
 VALUES ($1, $2, $3, $4, $5)

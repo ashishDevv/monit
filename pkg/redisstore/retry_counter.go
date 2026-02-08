@@ -20,8 +20,7 @@ func (c *Client) IncrementRetry(ctx context.Context, monitorID uuid.UUID) (int64
 			return err
 		}
 
-		c.rdb.Expire(ctx, key, 5*time.Minute)
-		return nil
+		return c.rdb.Expire(ctx, key, 5*time.Minute).Err()
 	})
 
 	return count, err

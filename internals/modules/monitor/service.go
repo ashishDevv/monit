@@ -53,7 +53,7 @@ func (s *Service) CreateMonitor(ctx context.Context, data CreateMonitorCmd) (uui
 		return uuid.UUID{}, err
 	}
 
-	s.scheduleMonitor(ctx, monitorID, data.IntervalSec, op)
+	s.ScheduleMonitor(ctx, monitorID, data.IntervalSec, op)
 
 	return monitorID, nil
 }
@@ -166,7 +166,7 @@ func (s *Service) UpdateMonitorStatus(ctx context.Context, userID, monitorID uui
 
 	// 4. Side effects (best effort)
 	if enable {
-		s.scheduleMonitor(ctx, m.ID, m.IntervalSec, op)
+		s.ScheduleMonitor(ctx, m.ID, m.IntervalSec, op)
 	} else {
 		s.disableMonitor(ctx, monitorID)
 	}
@@ -174,7 +174,7 @@ func (s *Service) UpdateMonitorStatus(ctx context.Context, userID, monitorID uui
 	return true, nil
 }
 
-func (s *Service) scheduleMonitor(ctx context.Context, mID uuid.UUID, intervalSec int32, op string) {
+func (s *Service) ScheduleMonitor(ctx context.Context, mID uuid.UUID, intervalSec int32, op string) {
 
 	nextRun := time.Now().Add(time.Duration(intervalSec) * time.Second)
 

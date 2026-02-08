@@ -15,6 +15,7 @@ import (
 
 type MonitorService interface {
 	LoadMonitor(context.Context, uuid.UUID) (monitor.Monitor, error)
+	ScheduleMonitor(context.Context, uuid.UUID, int32, string)
 }
 
 type ResultProcessor struct {
@@ -25,7 +26,7 @@ type ResultProcessor struct {
 	// services
 	redisSvc     *redisstore.Client
 	monitorSvc   MonitorService
-	incidentRepo *MonitorIncidentRepository
+	incidentRepo *MonitorIncidentRepository // here should be MonitorIncidentService, make a seperate module for Monitor Incident
 
 	// channels
 	resultChan  chan executor.HTTPResult
@@ -53,8 +54,8 @@ func NewResultProcessor(
 		incidentRepo: incidentRepo,
 		monitorSvc:   monitorSvc,
 		alertChan:    alertChan,
-		successChan:  make(chan executor.HTTPResult, 50),
-		failureChan:  make(chan executor.HTTPResult, 5),
+		successChan:  make(chan executor.HTTPResult, 50), // number should be passed as parameter
+		failureChan:  make(chan executor.HTTPResult, 5),  // number should be passed as parameter
 		logger:       logger,
 	}
 }
