@@ -21,7 +21,7 @@ type AlertService struct {
 
 func NewAlertService(workerCount int, alertChan chan AlertEvent, logger *zerolog.Logger) *AlertService {
 	return &AlertService{
-		workerCount: workerCount,
+		workerCount: workerCount,   // specify in config
 		alertChan:   alertChan,
 		logger:      logger,
 	}
@@ -29,18 +29,20 @@ func NewAlertService(workerCount int, alertChan chan AlertEvent, logger *zerolog
 
 // Starts starts the Alert Service
 func (s *AlertService) Start() {
-
+	
 	s.workerWG.Add(s.workerCount)
 
 	for range s.workerCount {
 		go s.handleAlerts()
 	}
+	s.logger.Info().Msg("Alert workers started")
 }
 
 func (s *AlertService) handleAlerts() {
 	defer s.workerWG.Done()
 
 	for alert := range s.alertChan {
+		s.logger.Info().Msg("Alert Recieved")
 		log.Print(alert.MonitorID)
 	}
 }

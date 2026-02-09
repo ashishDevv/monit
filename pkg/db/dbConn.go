@@ -19,7 +19,7 @@ type Config struct {
 	HealthTimeout   time.Duration
 }
 
-func Init(ctx context.Context, cfg Config, log *zerolog.Logger) (*pgxpool.Pool, error) {
+func ConnectToDB(ctx context.Context, cfg Config, log *zerolog.Logger) (*pgxpool.Pool, error) {
 	poolCfg, err := pgxpool.ParseConfig(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("parse db url: %w", err)

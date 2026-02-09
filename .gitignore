@@ -4,6 +4,7 @@ config/env.yaml
 keys/
 .env
 *.log
+log.json
 vendor/
 bin/
 *.exe

@@ -9,6 +9,18 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+/*
+ Schema =>
+	 monitor:incident:<id>
+		 {
+		   failure_count: int
+		   first_failure_at: unix_ts
+		   last_failure_at: unix_ts
+		   alerted: bool
+		   db_incident: bool
+		 }
+*/
+
 // func (c *Client) CreateIncident(ctx context.Context, monitorID uuid.UUID) error {
 // 	key := fmt.Sprintf("monitor:incident:%v", monitorID)
 
@@ -23,7 +35,7 @@ import (
 // }
 
 func (c *Client) IncrementIncident(ctx context.Context, monitorID uuid.UUID) (int64, bool, error) {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
 	now := time.Now().Unix()
 
 	var failureCount int64
@@ -44,7 +56,6 @@ func (c *Client) IncrementIncident(ctx context.Context, monitorID uuid.UUID) (in
 			c.rdb.HSet(ctx, key,
 				"first_failure_at", now,
 				"last_failure_at", now,
-				"alerted", false,
 			)
 			firstTime = true
 		} else {
@@ -59,7 +70,7 @@ func (c *Client) IncrementIncident(ctx context.Context, monitorID uuid.UUID) (in
 }
 
 func (c *Client) ClearIncident(ctx context.Context, monitorID uuid.UUID) error {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
 
 	return retry(ctx, 2, func() error {
 		return c.rdb.Del(ctx, key).Err()
@@ -67,15 +78,16 @@ func (c *Client) ClearIncident(ctx context.Context, monitorID uuid.UUID) error {
 }
 
 func (c *Client) MarkIncidentAlerted(ctx context.Context, monitorID uuid.UUID) error {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
-    return c.rdb.HSet(ctx,
-        key,
-        "alerted", true,
-    ).Err()
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
+	return c.rdb.HSet(ctx,
+		key,
+		"alerted", "true",
+		"db_incident", "false",
+	).Err()
 }
 
 func (c *Client) GetIncidentAlerted(ctx context.Context, monitorID uuid.UUID) (bool, error) {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
 
 	resp, err := c.rdb.HGet(ctx, key, "alerted").Result()
 	if err != nil {
@@ -89,7 +101,7 @@ func (c *Client) GetIncidentAlerted(ctx context.Context, monitorID uuid.UUID) (b
 }
 
 func (c *Client) GetIncident(ctx context.Context, monitorID uuid.UUID) (map[string]string, error) {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
 
 	resp, err := c.rdb.HGetAll(ctx, key).Result()
 	if err == redis.Nil {
@@ -99,7 +111,7 @@ func (c *Client) GetIncident(ctx context.Context, monitorID uuid.UUID) (map[stri
 }
 
 func (c *Client) ClearIncidentIfExists(ctx context.Context, monitorID uuid.UUID) (bool, error) {
-	key := fmt.Sprintf("monitor:incident:%v", monitorID)
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
 
 	var n int64
 
@@ -110,4 +122,22 @@ func (c *Client) ClearIncidentIfExists(ctx context.Context, monitorID uuid.UUID)
 	})
 
 	return n == 1, err
+}
+
+func (c *Client) MarkDBIncidentCreated(ctx context.Context, monitorID uuid.UUID) error {
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
+
+	return c.rdb.HSet(ctx, key,
+		"db_incident", "true",
+	).Err()
+}
+
+func (c *Client) MarkIncidentAlertedIfNotSet(ctx context.Context, monitorID uuid.UUID) (bool, error) {
+	key := fmt.Sprintf("monitor:incident:%v", monitorID.String())
+
+	res, err := c.rdb.HSetNX(ctx, key, "alerted", "true").Result()
+	if err != nil {
+		return false, err
+	}
+	return res, nil // true means => first time
 }

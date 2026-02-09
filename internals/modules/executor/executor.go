@@ -23,22 +23,22 @@ type MonitorService interface {
 type Executor struct {
 	// lifecycle
 	ctx         context.Context
-	workerCount int
+	workerCount int // specify it in config
 
 	// channels
-	jobChan     chan scheduler.JobPayload
-	resultChan  chan HTTPResult
+	jobChan    chan scheduler.JobPayload
+	resultChan chan HTTPResult
 
 	// services
-	monitorSvc  MonitorService
+	monitorSvc MonitorService
 
 	// http goroutines config
-	httpSem     chan struct{}
-	httpWg      sync.WaitGroup
-	httpClient  *http.Client
+	httpSem    chan struct{}
+	httpWg     sync.WaitGroup
+	httpClient *http.Client
 
 	// misc
-	logger      *zerolog.Logger
+	logger *zerolog.Logger
 }
 
 func NewExecutor(
@@ -56,32 +56,35 @@ func NewExecutor(
 		jobChan:     jobChan,
 		resultChan:  resultChan,
 		monitorSvc:  monitorSvc,
-		httpSem:     make(chan struct{}, 5000), // 5k http concurent
+		httpSem:     make(chan struct{}, 5000), // 5k http concurent , specify it in config
 		httpClient:  newHttpClient(),
 		logger:      logger,
 	}
 }
 
 // StartWorkers starts the Executor workers
-func (ew *Executor) StartWorkers() {    
-	for range ew.workerCount {     // 100  , -> 5mb
+func (ew *Executor) StartWorkers() {
+	for range ew.workerCount { // 100  , -> 5mb
 		go ew.startWork()
 	}
+	
+	ew.logger.Info().Int("workers", ew.workerCount).Msg("Executor workers started")
 }
 
 func (ew *Executor) startWork() {
 
 	for job := range ew.jobChan {
+		ew.logger.Info().Str("monitor_id", job.MonitorID.String()).Msg("New job in Job Channel")
 		// load monitor
-		monitor, err := ew.monitorSvc.LoadMonitor(ew.ctx, job.MonitorID)  
+		monitor, err := ew.monitorSvc.LoadMonitor(ew.ctx, job.MonitorID)
 		if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
 			// if err == not found -> simply return as monitor is deleted
 			if apperror.IsKind(err, apperror.NotFound) {
 				return
 			}
 			// if err anything else -> it critical
-			// IT SHOULD BE RE-SCHEDULE 
-			// log it 
+			// IT SHOULD BE RE-SCHEDULE
+			// log it
 			ew.monitorSvc.ScheduleMonitor(ew.ctx, job.MonitorID, 5, "executor.start_work")
 			ew.logger.Error().Err(err).Str("monitor_id", job.MonitorID.String()).Msg("error in loading monitor in executor")
 			return
@@ -89,6 +92,8 @@ func (ew *Executor) startWork() {
 		if !monitor.Enabled { // monitor is disabled, so dont proceed further
 			return // we not have to do this further
 		}
+		
+		ew.logger.Info().Msg("Monitor Loaded")
 
 		// acquire http semaphore
 		ew.httpSem <- struct{}{}
@@ -101,6 +106,7 @@ func (ew *Executor) startWork() {
 			}()
 
 			result := ew.executeHTTPCheck(monitor)
+			ew.logger.Info().Object("http_result", result).Msg("Got HTTPResult and pushed to result channel")
 			ew.resultChan <- result
 		}()
 	}
@@ -120,8 +126,8 @@ func (ew *Executor) executeHTTPCheck(monitor monitor.Monitor) HTTPResult {
 
 	req, err := http.NewRequestWithContext(httpReqCtx, "GET", monitor.Url, nil)
 	if err != nil {
-		// this is request building error -> means url is wrong, 
-		// so its clients problem, we should handle it seperately in result processor, 
+		// this is request building error -> means url is wrong,
+		// so its clients problem, we should handle it seperately in result processor,
 		// and add this in DB/redis (so client get to know about this), and DO NOT RE-SCHEDULE IT
 		// log it as well as that we can see it
 		ew.logger.Error().
@@ -129,11 +135,11 @@ func (ew *Executor) executeHTTPCheck(monitor monitor.Monitor) HTTPResult {
 			Str("monitor_id", monitor.ID.String()).
 			Str("monitor_url", monitor.Url).
 			Msg("error in building request")
-		
+
 		return HTTPResult{
 			MonitorID: monitor.ID,
 			Success:   false,
-			Reason:    "INVALID_REQUEST",  // check with this in result processor
+			Reason:    "INVALID_REQUEST", // check with this in result processor
 			Retryable: false,
 			CheckedAt: time.Now(),
 		}
@@ -186,7 +192,7 @@ func (_ *Executor) classifyError(err error) (string, bool) {
 
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		return "DNS_FAILURE", false 
+		return "DNS_FAILURE", false
 	}
 
 	var netErr net.Error

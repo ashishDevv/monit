@@ -19,14 +19,13 @@ type Scheduler struct {
 	batchSize int
 
 	// channels
-	jobChan   chan JobPayload
+	jobChan chan JobPayload
 
 	// services
-	redisSvc  *redisstore.Client
-	
+	redisSvc *redisstore.Client
+
 	// misc
-	logger    *zerolog.Logger
-	
+	logger *zerolog.Logger
 }
 
 func NewScheduler(
@@ -40,14 +39,15 @@ func NewScheduler(
 		ctx:       ctx,
 		jobChan:   jobChan,
 		redisSvc:  redisSvc,
-		interval:  2 * time.Second,
-		batchSize: 500,
+		interval:  10 * time.Second, // specify interval duration in config
+		batchSize: 5,                // specify batchSize in config
 		logger:    logger,
 	}
 }
 
 // StartScheduler starts the Scheduler
 func (sc *Scheduler) StartScheduler() {
+	sc.logger.Info().Msg("Scheduler started")
 	ticker := time.NewTicker(sc.interval)
 	sc.ticker = ticker
 
@@ -56,12 +56,13 @@ func (sc *Scheduler) StartScheduler() {
 			select {
 			case <-sc.ctx.Done():
 				sc.ticker.Stop()
-				sc.logger.Info().Msg("scheduler stopped")
+				sc.logger.Info().Msg("Scheduler stopped")
 				return
 
 			case <-ticker.C:
 				// pull jobs from redis
-				sc.doWork()   // 400 ms
+				sc.logger.Info().Msg("Scheduler Ticked")
+				sc.doWork() // 400 ms
 			}
 		}
 	}()
@@ -70,7 +71,7 @@ func (sc *Scheduler) StartScheduler() {
 func (sc *Scheduler) doWork() {
 	now := time.Now().Unix()
 
-	items, err := sc.redisSvc.PopDue(sc.ctx, sc.batchSize)  // 5000,  pr => 95%,  100 non valid
+	items, err := sc.redisSvc.PopDue(sc.ctx, sc.batchSize) // 5000,  pr => 95%,  100 non valid
 	if err != nil {
 		// transient redis error → log & move on
 		sc.logger.Error().Err(err).Msg("error to pop scheduled monitors from redis")
@@ -78,9 +79,10 @@ func (sc *Scheduler) doWork() {
 	}
 
 	if len(items) == 0 {
-		time.Sleep(200 * time.Millisecond)
 		return
 	}
+	
+	sc.logger.Info().Msgf("Scheduler popped %v items", len(items))
 
 	reinsert := make([]redis.Z, 0, 10)
 
@@ -112,6 +114,7 @@ func (sc *Scheduler) doWork() {
 				// log it
 				sc.logger.Error().Err(err).Msg("error to schedule in batch")
 			}
+			sc.logger.Info().Msgf("Scheduler reinserted %v items", len(reinsert))
 			break
 		}
 
@@ -123,14 +126,16 @@ func (sc *Scheduler) doWork() {
 		}
 
 		select {
-		case sc.jobChan <- JobPayload{MonitorID: id}: // has space 
+		case sc.jobChan <- JobPayload{MonitorID: id}: // has space
 			// success
 		case <-sc.ctx.Done():
 			return
 		default:
 			// jobChan full → backpressure protection
 			// reinsert job so it’s not lost
-			if err := sc.redisSvc.Schedule(sc.ctx, item.Member.(string), time.Unix(score, 0)); err != nil {
+			sc.logger.Info().Msg("Applying backpressure and re-scheduling")
+			backoff := time.Unix(score, 0).Add(2 * time.Second)
+			if err := sc.redisSvc.Schedule(sc.ctx, item.Member.(string), backoff); err != nil {
 				sc.logger.Error().Err(err).Msg("error in scheduling monitor")
 				// enqueue in queue
 			}

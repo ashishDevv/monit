@@ -25,7 +25,7 @@ func main() {
 	log.Info().Msg("logger initialized")
 
 	// Initialize DB Pool
-	dbPool, err := db.Init(ctx, db.Config{
+	dbPool, err := db.ConnectToDB(ctx, db.Config{
 		URL:             cfg.DBURL,
 		MaxConns:        50,
 		MinConns:        5,
@@ -76,7 +76,7 @@ func main() {
 	if err := srv.Shutdown(context.Background()); err != nil {
 		log.Error().Err(err).Msg("server shutdown failed")
 	}
-
+	
 	// 2. Shutdown background workers & infra
 	_, cancle := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
 	defer cancle()
