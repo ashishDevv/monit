@@ -78,18 +78,11 @@ func (r *MonitorIncidentRepository) GetByID(ctx context.Context, incidentID uuid
 func (r *MonitorIncidentRepository) CloseIncident(ctx context.Context, monitorID uuid.UUID, endTime time.Time) error {
 	const op string = "repo.monitor_incident.close_incident"
 	
-	rowsEffected, err := r.querier.CloseMonitorIncident(ctx, db.CloseMonitorIncidentParams{
+	_, err := r.querier.CloseMonitorIncident(ctx, db.CloseMonitorIncidentParams{
 		MonitorID: utils.ToPgUUID(monitorID),
 		EndTime: utils.ToPgTimestamptz(endTime),
 	})
 	if err == nil {
-		if rowsEffected == 0 {
-			return &apperror.Error{
-				Kind: apperror.NotFound,
-				Op: op,
-				Message: "required incident not found",
-			}
-		}
 		return nil
 	}
 	

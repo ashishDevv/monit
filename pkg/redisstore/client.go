@@ -16,24 +16,34 @@ type Client struct {
 	rdb *redis.Client
 }
 
-func New(addr, password string, db int) (*Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-        Addr:         addr,
-        Password:     password,
-        DB:           db,
-        DialTimeout:  5 * time.Second,
-        ReadTimeout:  3 * time.Second,
-        WriteTimeout: 3 * time.Second,
-        PoolSize:     50,
-        MinIdleConns: 10,
-    })
+func New(redisURL string) (*Client, error) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, err
+	}
 
-	ctx, cancle := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancle()
+	// Timeouts
+	opt.DialTimeout = 5 * time.Second
+	opt.ReadTimeout = 3 * time.Second
+	opt.WriteTimeout = 3 * time.Second
+
+	// Pool tuning
+	opt.PoolSize = 10
+	opt.MinIdleConns = 5
+
+	// Connection lifecycle
+	opt.ConnMaxLifetime = 2 * time.Minute  
+	opt.ConnMaxIdleTime = 30 * time.Second 
+
+	rdb := redis.NewClient(opt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
-        return nil, err
-    }
+		return nil, err
+	}
+
 	return &Client{rdb: rdb}, nil
 }
 
@@ -79,19 +89,19 @@ func (c *Client) Close() error {
 // 		"device_id": deviceID,
 // 		"email": email,
 // 	}).Err()
-	
+
 // 	if err != nil {
 // 		return err
 // 	}
 // 	err = r.redisClient.Expire(ctx, key, ttl).Err()
 // 	if err != nil {
 // 		return err
-// 	}	
+// 	}
 // 	return nil
 // }
 
 // func (r *Redis) HSetAny(ctx context.Context, key string, ttl time.Duration, payload map[string]any) error {
-	
+
 // 	err := r.redisClient.HSet(ctx, key, payload).Err()
 // 	if err != nil {
 // 		return err
@@ -99,7 +109,7 @@ func (c *Client) Close() error {
 // 	err = r.redisClient.Expire(ctx, key, ttl).Err()
 // 	if err != nil {
 // 		return err
-// 	}	
+// 	}
 // 	return nil
 // }
 
@@ -121,4 +131,3 @@ func (c *Client) Close() error {
 // 	key := fmt.Sprintf("refresh:%v", hash)
 // 	return r.redisClient.Del(ctx, key).Err()
 // }
-

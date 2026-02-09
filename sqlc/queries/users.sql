@@ -15,5 +15,5 @@ WHERE email = $1;
 
 -- name: IncrementMonitorCount :execrows
 UPDATE users
-SET monitor_count = monitor_count + 1
-WHERE id = $1 AND monitor_count < 10;
+SET monitors_count = monitors_count + 1
+WHERE id = $1 AND monitors_count < 10;

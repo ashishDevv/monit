@@ -54,8 +54,8 @@ func NewResultProcessor(
 		incidentRepo: incidentRepo,
 		monitorSvc:   monitorSvc,
 		alertChan:    alertChan,
-		successChan:  make(chan executor.HTTPResult, 50), // number should be passed as parameter
-		failureChan:  make(chan executor.HTTPResult, 5),  // number should be passed as parameter
+		successChan:  make(chan executor.HTTPResult, 100), // number should be passed as parameter
+		failureChan:  make(chan executor.HTTPResult, 50),  // number should be passed as parameter
 		logger:       logger,
 	}
 }
@@ -67,16 +67,18 @@ func (rp *ResultProcessor) StartResultProcessor() {
 	// start success and failure workers
 	rp.workerWG.Add(55) // add for all as we have to wait for each worker to complete
 
-	for range 50 {
+	for range 50 {              // specify in config
 		go rp.successWorker()
 	}
 
-	for range 5 {
+	for range 5 {              // specify in config
 		go rp.failureWorker()
 	}
 
 	// now start result router
 	go rp.router()
+	
+	rp.logger.Info().Msg("Result Processor Started with workers")
 }
 
 func (rp *ResultProcessor) router() {

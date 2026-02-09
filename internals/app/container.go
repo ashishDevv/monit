@@ -37,15 +37,15 @@ type Container struct {
 
 func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, logger *zerolog.Logger) (*Container, error) {
 
-	redisClient, err := redisstore.New(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+	redisClient, err := redisstore.New(cfg.RedisURL)
 	if err != nil {
 		return nil, err
 	}
 	tokenSvc := security.NewTokenService(cfg.Auth)
 
-	jobChan := make(chan scheduler.JobPayload, 1000)
-	resultChan := make(chan executor.HTTPResult, 1000)
-	alertChan := make(chan alert.AlertEvent, 500)
+	jobChan := make(chan scheduler.JobPayload, 1000)   // spcify channel size in config
+	resultChan := make(chan executor.HTTPResult, 1000) // spcify channel size in config
+	alertChan := make(chan alert.AlertEvent, 500) // spcify channel size in config
 
 	validator := validator.New()
 

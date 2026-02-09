@@ -40,7 +40,7 @@ func LoadConfig(path string) *Config {
 		log.Fatal("Auth config required is required")
 	}
 	
-	if cfg.Redis == nil {
+	if cfg.RedisURL == "" {
 		log.Fatal("Redis configrations are required")
 	}
 
