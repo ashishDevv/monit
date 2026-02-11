@@ -2,6 +2,7 @@ package alert
 
 import (
 	"log"
+	"project-k/config"
 	"sync"
 
 	"github.com/rs/zerolog"
@@ -13,15 +14,15 @@ type AlertService struct {
 	workerWG    sync.WaitGroup
 
 	// channels
-	alertChan   chan AlertEvent
+	alertChan chan AlertEvent
 
 	// misc
-	logger      *zerolog.Logger
+	logger *zerolog.Logger
 }
 
-func NewAlertService(workerCount int, alertChan chan AlertEvent, logger *zerolog.Logger) *AlertService {
+func NewAlertService(alertConfig *config.AlertConfig, alertChan chan AlertEvent, logger *zerolog.Logger) *AlertService {
 	return &AlertService{
-		workerCount: workerCount,   // specify in config
+		workerCount: alertConfig.WorkerCount,
 		alertChan:   alertChan,
 		logger:      logger,
 	}
@@ -29,7 +30,7 @@ func NewAlertService(workerCount int, alertChan chan AlertEvent, logger *zerolog
 
 // Starts starts the Alert Service
 func (s *AlertService) Start() {
-	
+
 	s.workerWG.Add(s.workerCount)
 
 	for range s.workerCount {

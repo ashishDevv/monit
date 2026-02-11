@@ -9,20 +9,20 @@ import (
 )
 
 type TokenService struct {
-	secret    string
-	expiryMin int
+	secret   string
+	tokenTTL time.Duration // it's come in minutes now
 }
 
 func NewTokenService(authCfg *config.AuthConfig) *TokenService {
 	return &TokenService{
-		secret:    authCfg.Secret,
-		expiryMin: authCfg.ExpiryMin,
+		secret:   authCfg.Secret,
+		tokenTTL: authCfg.TokenTTL,
 	}
 }
 
 func (ts *TokenService) GenerateAccessToken(payload RequestClaims) (string, error) {
 	now := time.Now()
-	expiryTime := now.Add(time.Duration(ts.expiryMin) * time.Minute)
+	expiryTime := now.Add(ts.tokenTTL)
 
 	payload.ExpiresAt = jwt.NewNumericDate(expiryTime)
 	payload.IssuedAt = jwt.NewNumericDate(now)
@@ -55,8 +55,8 @@ func (ts *TokenService) ValidateAccessToken(accessToken string) (*RequestClaims,
 
 	if err != nil || !token.Valid {
 		return nil, &apperror.Error{
-			Kind: apperror.Unauthorised,
-			Op: op,
+			Kind:    apperror.Unauthorised,
+			Op:      op,
 			Message: "invalid token",
 		}
 	}

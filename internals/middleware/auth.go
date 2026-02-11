@@ -33,7 +33,7 @@ func NewAuthMiddleware(tokenSvc *security.TokenService) *AuthMiddleware {
 }
 
 func (a *AuthMiddleware) Handle(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fn := func(w http.ResponseWriter, r *http.Request) {
 
 		token, err := a.extractBearerToken(r)
 		if err != nil {
@@ -55,7 +55,9 @@ func (a *AuthMiddleware) Handle(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), userCtxKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	}
+	
+	return http.HandlerFunc(fn)
 }
 
 func (_ *AuthMiddleware) extractBearerToken(r *http.Request) (string, error) {

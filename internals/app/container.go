@@ -37,15 +37,15 @@ type Container struct {
 
 func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, logger *zerolog.Logger) (*Container, error) {
 
-	redisClient, err := redisstore.New(cfg.RedisURL)
+	redisClient, err := redisstore.New(&cfg.Redis)
 	if err != nil {
 		return nil, err
 	}
-	tokenSvc := security.NewTokenService(cfg.Auth)
+	tokenSvc := security.NewTokenService(&cfg.Auth)
 
-	jobChan := make(chan scheduler.JobPayload, 1000)   // spcify channel size in config
-	resultChan := make(chan executor.HTTPResult, 1000) // spcify channel size in config
-	alertChan := make(chan alert.AlertEvent, 500) // spcify channel size in config
+	jobChan := make(chan scheduler.JobPayload, cfg.App.JobChannelSize)      // specify channel size in config
+	resultChan := make(chan executor.HTTPResult, cfg.App.ResultChannelSize) // specify channel size in config
+	alertChan := make(chan alert.AlertEvent, cfg.App.AlertChannelSize)      // specify channel size in config
 
 	validator := validator.New()
 
@@ -56,10 +56,10 @@ func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, log
 	userService := user.NewService(userRepo, tokenSvc)
 	monitorSvc := monitor.NewService(monitorRepo, redisClient, userService, logger)
 
-	sch := scheduler.NewScheduler(ctx, jobChan, redisClient, logger)
-	exec := executor.NewExecutor(ctx, 100, jobChan, resultChan, monitorSvc, logger)
-	resultPro := result.NewResultProcessor(ctx, redisClient, resultChan, incidentRepo, monitorSvc, alertChan, logger)
-	alertSvc := alert.NewAlertService(50, alertChan, logger)
+	sch := scheduler.NewScheduler(ctx, &cfg.Scheduler, jobChan, redisClient, logger)
+	exec := executor.NewExecutor(ctx, &cfg.Executor, jobChan, resultChan, monitorSvc, logger)
+	resultPro := result.NewResultProcessor(ctx, &cfg.ResultProcessor, redisClient, resultChan, incidentRepo, monitorSvc, alertChan, logger)
+	alertSvc := alert.NewAlertService(&cfg.Alert, alertChan, logger)
 
 	monitorHandler := monitor.NewHandler(monitorSvc, validator, logger)
 	userHandler := user.NewHandler(userService, validator, logger)
@@ -101,12 +101,12 @@ func (c *Container) Shutdown() error {
 	// close redis
 	err := c.RedisClient.Close()
 	if err != nil {
-		return  err
+		return err
 	}
 
-	// Close DB pool
-	if c.DB != nil {
-		c.DB.Close()
-	}
+	// Close DB pool , do not close here , it will be closed in defer in main.go
+	//if c.DB != nil {
+	//	c.DB.Close()
+	//}
 	return nil
 }

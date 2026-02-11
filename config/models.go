@@ -1,80 +1,73 @@
 package config
 
+import "time"
+
 type AuthConfig struct {
-	Secret    string `mapstructure:"secret"`
-	ExpiryMin int    `mapstructure:"expiry_min"`
+	Secret string `mapstructure:"secret" validate:"required"`
+	// it parsed as minutes
+	TokenTTL time.Duration `mapstructure:"token_ttl" validate:"gt=0"`
 }
 
-// type RabbitMQConfig struct {
-// 	BrokerLink   string `mapstructure:"broker_link"`
-// 	ExchangeName string `mapstructure:"exchange_name"`
-// 	ExchangeType string `mapstructure:"exchange_type"`
-// 	QueueName    string `mapstructure:"queue_name"`
-// 	RoutingKey   string `mapstructure:"routing_key"`
-// 	WorkerCount  int    `mapstructure:"worker_count"`
-// }
-
-// type RedisConfig struct {
-// 	Addr     string `mapstructure:"addr"`
-// 	Password string `mapstructure:"password"`
-// }
-
 type AppConfig struct {
-	JobChannelSize    int // size of JobChan
-	ResultChannelSize int // size of ResultChan
-	AlertChannelSize  int // size of AlertChan
+	JobChannelSize    int `mapstructure:"job_channel_size" validate:"gte=100,lte=5000"`
+	ResultChannelSize int `mapstructure:"result_channel_size" validate:"gte=100,lte=5000"`
+	AlertChannelSize  int `mapstructure:"alert_channel_size" validate:"gte=100,lte=5000"`
 }
 
 type SchedulerConfig struct {
-	IntervalSec int // at what interval scheduler will tick
-	BatchSize   int // amount of monitors scheduler will pull from redis
+	Interval  time.Duration `mapstructure:"interval" validate:"gte=5"` // should be in sec
+	BatchSize int           `mapstructure:"batch_size" validate:"gt=0"`
 }
 
 type ExecutorConfig struct {
-	WorkerCount  int // count of executor workers
-	HTTPSemCount int // count of HTTP semaphores
+	WorkerCount  int `mapstructure:"worker_count" validate:"gte=5,lte=200"`
+	HTTPSemCount int `mapstructure:"http_semaphore_count" validate:"gte=5,lte=6000"`
 }
 
 type AlertConfig struct {
-	WorkerCount  int
-	OwnerEmailID string
-	AccessKey    string
+	WorkerCount int    `mapstructure:"worker_count" validate:"gte=5"`
+	OwnerEmail  string `mapstructure:"owner_email" validate:"required"`
+	AccessKey   string `mapstructure:"access_key" validate:"required"`
 }
 
-type ResultProcessor struct {
-	SuccessWorkersCount int
-	SuccessChannelSize  int
-	FailureWorkerCount  int
-	FailureChannelSize  int
+type ResultProcessorConfig struct {
+	SuccessWorkerCount int `mapstructure:"success_worker_count" validate:"gte=5"`
+	SuccessChannelSize int `mapstructure:"success_channel_size" validate:"gte=5"`
+	FailureWorkerCount int `mapstructure:"failure_worker_count" validate:"gte=5"`
+	FailureChannelSize int `mapstructure:"failure_channel_size" validate:"gte=5"`
 }
 
 type RedisConfig struct {
-	RedisURL           string
-	DialTimeoutSec     int32
-	ReadTimeoutSec     int32
-	WriteTimeoutSec    int32
-	PoolSize           int32
-	MinIdleConns       int32
-	ConnMaxLifeTimeMin int32
-	ConnMaxIdleTimeSec int32
+	URL             string        `mapstructure:"url" validate:"required,url"`
+	DialTimeout     time.Duration `mapstructure:"dial_timeout" validate:"gt=0"`
+	ReadTimeout     time.Duration `mapstructure:"read_timeout" validate:"gt=0"`
+	WriteTimeout    time.Duration `mapstructure:"write_timeout" validate:"gt=0"`
+	PoolSize        int           `mapstructure:"pool_size" validate:"gte=1,lte=1000"`
+	MinIdleConns    int           `mapstructure:"min_idle_conns" validate:"gt=0"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime" validate:"gt=0"`
+	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time" validate:"gt=0"`
 }
 
 type DBConfig struct {
-	DBURL              string
-	MaxConns           int32
-	MinConns           int32
-	ConnMaxLifeTimeMin int32
-	ConnMaxIdleTimeSec int32
-	HealthTimeout      int32
+	URL             string        `mapstructure:"url" validate:"required,url"`
+	MaxOpenConns    int32         `mapstructure:"max_open_conns" validate:"gt=0"`
+	MinIdleConns    int32         `mapstructure:"min_idle_conns" validate:"gt=0"`
+	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime" validate:"gt=0"`
+	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time" validate:"gt=0"`
+	HealthTimeout   time.Duration `mapstructure:"health_timeout" validate:"gt=0"`
 }
 
 type Config struct {
-	DBURL       string `mapstructure:"db_url"`
-	Port        int    `mapstructure:"port"`
-	Env         string `mapstructure:"env"`
+	Env         string `mapstructure:"env" validate:"required,oneof=development staging production"`
 	ServiceName string `mapstructure:"service_name"`
-	RedisURL    string `mapstructure:"redis_url"`
-	// Redis       *RedisConfig `mapstructure:"redis"`
-	Auth *AuthConfig `mapstructure:"auth"`
-	// RabbitMQ    *RabbitMQConfig `mapstructure:"rabbitmq"`
+	Port        int    `mapstructure:"port" validate:"gte=1,lte=65535"`
+
+	Auth            AuthConfig            `mapstructure:"auth" validate:"required"`
+	App             AppConfig             `mapstructure:"app" validate:"required"`
+	Scheduler       SchedulerConfig       `mapstructure:"scheduler" validate:"required"`
+	Executor        ExecutorConfig        `mapstructure:"executor" validate:"required"`
+	Alert           AlertConfig           `mapstructure:"alert" validate:"required"`
+	ResultProcessor ResultProcessorConfig `mapstructure:"result_processor" validate:"required"`
+	Redis           RedisConfig           `mapstructure:"redis" validate:"required"`
+	DB              DBConfig              `mapstructure:"db" validate:"required"`
 }

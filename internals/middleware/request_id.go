@@ -8,7 +8,7 @@ import (
 )
 
 func RequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	fn := func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = uuid.NewString()
@@ -16,5 +16,7 @@ func RequestID(next http.Handler) http.Handler {
 
 		ctx := context.WithValue(r.Context(), "request_id", requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+	}
+	
+	return http.HandlerFunc(fn)
 }

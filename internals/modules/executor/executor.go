@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"project-k/config"
 	"project-k/internals/modules/monitor"
 	"project-k/internals/modules/scheduler"
 	"project-k/pkg/apperror"
@@ -43,7 +44,7 @@ type Executor struct {
 
 func NewExecutor(
 	ctx context.Context,
-	workerCount int,
+	executorConfig *config.ExecutorConfig,
 	jobChan chan scheduler.JobPayload,
 	resultChan chan HTTPResult,
 	monitorSvc MonitorService,
@@ -52,11 +53,11 @@ func NewExecutor(
 
 	return &Executor{
 		ctx:         ctx,
-		workerCount: workerCount,
+		workerCount: executorConfig.WorkerCount,
 		jobChan:     jobChan,
 		resultChan:  resultChan,
 		monitorSvc:  monitorSvc,
-		httpSem:     make(chan struct{}, 5000), // 5k http concurent , specify it in config
+		httpSem:     make(chan struct{}, executorConfig.HTTPSemCount), // 5k http concurrent , specify it in config
 		httpClient:  newHttpClient(),
 		logger:      logger,
 	}
@@ -67,7 +68,7 @@ func (ew *Executor) StartWorkers() {
 	for range ew.workerCount { // 100  , -> 5mb
 		go ew.startWork()
 	}
-	
+
 	ew.logger.Info().Int("workers", ew.workerCount).Msg("Executor workers started")
 }
 
@@ -92,7 +93,7 @@ func (ew *Executor) startWork() {
 		if !monitor.Enabled { // monitor is disabled, so dont proceed further
 			return // we not have to do this further
 		}
-		
+
 		ew.logger.Info().Msg("Monitor Loaded")
 
 		// acquire http semaphore
