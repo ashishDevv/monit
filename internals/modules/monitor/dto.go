@@ -9,6 +9,10 @@ type CreateMonitorRequest struct {
 	ExpectedStatus     int32  `json:"expected_status" validate:"required,gte=100,lte=599"`
 }
 
+type CreateMonitorResponse struct {
+	MonitorID string `json:"monitor_id"`
+}
+
 type GetMonitorResponse struct {
 	ID                 string `json:"id"`
 	Url                string `json:"url"`

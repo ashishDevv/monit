@@ -14,6 +14,10 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
+type RegisterResponse struct {
+	UserID string `json:"user_id"`
+}
+
 type LogInRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`

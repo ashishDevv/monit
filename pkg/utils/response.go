@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"project-k/pkg/apperror"
+
+	"github.com/rs/zerolog/log"
 )
 
 type SuccessResponse[T any] struct {
@@ -14,26 +16,32 @@ type SuccessResponse[T any] struct {
 	Data      T      `json:"data,omitempty"` // Omit if nil
 }
 
+type Error struct {
+	Kind    apperror.Kind `json:"kind"` // this is ErrorCode not httpCode, its like VALIDATION_FAILED
+	Message string        `json:"message,omitempty"`
+	// Details any           `json:"details,omitempty"` // slice or map
+}
+
 type ErrorResponse struct {
 	Success   bool   `json:"success"`
 	RequestID string `json:"request_id"`
-	Error     struct {
-		Kind    apperror.Kind `json:"kind"` // this is ErrorCode not httpCode, its like VALIDATION_FAILED
-		Message string        `json:"message,omitempty"`
-		// Details any    `json:"details,omitempty"` // slice or map
-	} `json:"error"`
+	Error     Error  `json:"error"`
 }
 
-func WriteJSON[T any](w http.ResponseWriter, status int, message string, data T) {
+func WriteJSON[T any](w http.ResponseWriter, status int, reqID string, message string, data T) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
 	res := SuccessResponse[T]{
 		Success: true,
+		RequestID: reqID,
 		Message: message,
 		Data:    data,
 	}
-	_ = json.NewEncoder(w).Encode(res)
+	
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		log.Error().Err(err).Msg("error in encoding Success Response and sending it to client")
+	}
 }
 
 func FromAppError(w http.ResponseWriter, reqID string, err error) {
@@ -55,11 +63,15 @@ func WriteError(w http.ResponseWriter, httpStatusCode int, reqID string, code ap
 	w.WriteHeader(httpStatusCode)
 
 	res := ErrorResponse{
-		Success: false,
+		Success:   false,
+		RequestID: reqID,
+		Error: Error{
+			Kind:    code,
+			Message: message,
+		},
 	}
-	res.RequestID = reqID
-	res.Error.Kind = code
-	res.Error.Message = message
 
-	_ = json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		log.Error().Err(err).Msg("error in encoding Error Response and sending it to client")
+	}
 }
