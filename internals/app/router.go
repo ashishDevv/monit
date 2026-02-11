@@ -4,8 +4,7 @@ import (
 	middle "project-k/internals/middleware"
 	"project-k/internals/modules/monitor"
 	"project-k/internals/modules/user"
-
-	// "time"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -14,10 +13,10 @@ import (
 func RegisterRoutes(c *Container) chi.Router {
 	r := chi.NewRouter()
 
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
 	r.Use(middle.Logger(c.Logger))
-	// r.Use(middleware.Timeout(5 * time.Second))
+	r.Use(middleware.RequestID)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(5 * time.Second))
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		// v1.Use(c.authMW.Handle)  ->  When you want to apply to all v1 routes

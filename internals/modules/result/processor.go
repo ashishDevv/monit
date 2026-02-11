@@ -2,6 +2,7 @@ package result
 
 import (
 	"context"
+	"project-k/config"
 	"sync"
 
 	"project-k/internals/modules/alert"
@@ -23,6 +24,10 @@ type ResultProcessor struct {
 	ctx      context.Context
 	workerWG sync.WaitGroup
 
+	// processor config
+	successWorkerCount int
+	failureWorkerCount int
+
 	// services
 	redisSvc     *redisstore.Client
 	monitorSvc   MonitorService
@@ -40,6 +45,7 @@ type ResultProcessor struct {
 
 func NewResultProcessor(
 	ctx context.Context,
+	resProcessorConfig *config.ResultProcessorConfig,
 	redisSvc *redisstore.Client,
 	resultChan chan executor.HTTPResult,
 	incidentRepo *MonitorIncidentRepository,
@@ -48,36 +54,37 @@ func NewResultProcessor(
 	logger *zerolog.Logger,
 ) *ResultProcessor {
 	return &ResultProcessor{
-		ctx:          ctx,
-		redisSvc:     redisSvc,
-		resultChan:   resultChan,
-		incidentRepo: incidentRepo,
-		monitorSvc:   monitorSvc,
-		alertChan:    alertChan,
-		successChan:  make(chan executor.HTTPResult, 100), // number should be passed as parameter
-		failureChan:  make(chan executor.HTTPResult, 50),  // number should be passed as parameter
-		logger:       logger,
+		ctx:                ctx,
+		redisSvc:           redisSvc,
+		resultChan:         resultChan,
+		incidentRepo:       incidentRepo,
+		monitorSvc:         monitorSvc,
+		alertChan:          alertChan,
+		successChan:        make(chan executor.HTTPResult, resProcessorConfig.SuccessChannelSize), // number should be passed as parameter
+		failureChan:        make(chan executor.HTTPResult, resProcessorConfig.FailureChannelSize), // number should be passed as parameter
+		successWorkerCount: resProcessorConfig.SuccessWorkerCount,
+		failureWorkerCount: resProcessorConfig.FailureWorkerCount,
+		logger:             logger,
 	}
 }
 
 // StartResultProcessor starts the Result Processor
 func (rp *ResultProcessor) StartResultProcessor() {
-
 	// first
 	// start success and failure workers
-	rp.workerWG.Add(55) // add for all as we have to wait for each worker to complete
+	rp.workerWG.Add(rp.successWorkerCount + rp.failureWorkerCount) // add for all as we have to wait for each worker to complete
 
-	for range 50 {              // specify in config
+	for range rp.successWorkerCount { // specify in config
 		go rp.successWorker()
 	}
 
-	for range 5 {              // specify in config
+	for range rp.failureWorkerCount { // specify in config
 		go rp.failureWorker()
 	}
 
 	// now start result router
 	go rp.router()
-	
+
 	rp.logger.Info().Msg("Result Processor Started with workers")
 }
 

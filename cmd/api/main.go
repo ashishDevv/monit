@@ -14,25 +14,17 @@ import (
 
 func main() {
 	// Load envs
-	cfg := config.LoadConfig("config/env.yaml")
-
+	cfg, err := config.LoadConfig("env.yaml")
 	// Get Context with signals attached -> when ever a signal occurs , then `Done` channel of ctx will get closed
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Inititiate Base/global logger
+	// Initialize Base/global logger
 	log := logger.Init(cfg)
 	log.Info().Msg("logger initialized")
 
 	// Initialize DB Pool
-	dbPool, err := db.ConnectToDB(ctx, db.Config{
-		URL:             cfg.DBURL,
-		MaxConns:        50,
-		MinConns:        5,
-		ConnMaxLifetime: time.Hour,
-		ConnMaxIdleTime: 30 * time.Minute,
-		HealthTimeout:   5 * time.Second,
-	}, log)
+	dbPool, err := db.ConnectToDB(ctx, &cfg.DB, log)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to initialize db pool")
 	}
@@ -46,7 +38,7 @@ func main() {
 	}
 	log.Info().Msg("dependencies initialized")
 
-	// start our heros
+	// start our heroes
 	// start scheduler
 	container.Scheduler.StartScheduler()
 	// start executor
@@ -56,8 +48,8 @@ func main() {
 	// start alert service
 	container.AlertSvc.Start()
 
-	// all heros are initialized
-	log.Info().Msg("all heros initialized")
+	// all heroes are initialized
+	log.Info().Msg("all heroes initialized")
 
 	// Register Routes
 	router := app.RegisterRoutes(container)
@@ -76,7 +68,7 @@ func main() {
 	if err := srv.Shutdown(context.Background()); err != nil {
 		log.Error().Err(err).Msg("server shutdown failed")
 	}
-	
+
 	// 2. Shutdown background workers & infra
 	_, cancle := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
 	defer cancle()

@@ -10,20 +10,27 @@ import (
 
 func Logger(log *zerolog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+
 			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
-			reqID := middleware.GetReqID(r.Context())
+			defer func() {
+				reqID := middleware.GetReqID(r.Context())
 
-			next.ServeHTTP(w, r)
+				log.Info().
+					Str("request_id", reqID).
+					Str("method", r.Method).
+					Str("path", r.URL.Path).
+					Int("status", ww.Status()).
+					Int("bytes", ww.BytesWritten()).
+					Dur("duration", time.Since(start)).
+					Msg("request completed")
+			}()
 
-			log.Info().
-				Str("request_id", reqID).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Dur("duration", time.Since(start)).
-				Msg("request completed")
+			next.ServeHTTP(ww, r)
 			
-		})
+		}
+		return http.HandlerFunc(fn)
 	}
 }

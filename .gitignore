@@ -1,6 +1,7 @@
 # for golang project
 
-config/env.yaml
+env.yaml
+*.md
 keys/
 .env
 *.log

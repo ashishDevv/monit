@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"project-k/config"
 	"time"
 
 	"project-k/pkg/redisstore"
@@ -30,6 +31,7 @@ type Scheduler struct {
 
 func NewScheduler(
 	ctx context.Context,
+	schedulerConfig *config.SchedulerConfig,
 	jobChan chan JobPayload,
 	redisSvc *redisstore.Client,
 	logger *zerolog.Logger,
@@ -39,8 +41,8 @@ func NewScheduler(
 		ctx:       ctx,
 		jobChan:   jobChan,
 		redisSvc:  redisSvc,
-		interval:  10 * time.Second, // specify interval duration in config
-		batchSize: 5,                // specify batchSize in config
+		interval:  schedulerConfig.Interval, // It will be in sec
+		batchSize: schedulerConfig.BatchSize,
 		logger:    logger,
 	}
 }
@@ -81,7 +83,7 @@ func (sc *Scheduler) doWork() {
 	if len(items) == 0 {
 		return
 	}
-	
+
 	sc.logger.Info().Msgf("Scheduler popped %v items", len(items))
 
 	reinsert := make([]redis.Z, 0, 10)
