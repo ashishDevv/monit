@@ -33,27 +33,28 @@ func (h *Handler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 	const op string = "handler.monitor.create_monitor"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
+	
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 	userID, err := uuid.Parse(reqClaims.UserID)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 
 	// decode request body
 	var req CreateMonitorRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request")
 		return
 	}
 
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request")
 		return
 	}
 
@@ -75,28 +76,29 @@ func (h *Handler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 		utils.FromAppError(w, reqID, err)
 		return
 	}
-	utils.WriteJSON(w, http.StatusCreated, "monitor created sucessfully", mID)
+	utils.WriteJSON(w, http.StatusCreated, reqID, "monitor created sucessfully", CreateMonitorResponse{MonitorID: mID.String()})
 }
 
 func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
-	const op string = "handler.monitor.get_Monitor"
+	const op string = "handler.monitor.get_monitor"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
+	
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 	userID, err := uuid.Parse(reqClaims.UserID)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 
 	mIDStr := chi.URLParam(r, "monitorID")
 	monitorID, err := uuid.Parse(mIDStr)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
 	}
 
@@ -121,22 +123,23 @@ func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
 		Enabled:            mon.Enabled,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, "moniter retrived", m)
+	utils.WriteJSON(w, http.StatusOK, reqID, "moniter retrived", m)
 }
 
 // /monitors?offset=3&limit=10
 func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
-	const op string = "handler.monitor.get_Monitor"
+	const op string = "handler.monitor.get_all_monitor"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
+	
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 	userID, err := uuid.Parse(reqClaims.UserID)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 
@@ -145,13 +148,20 @@ func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
 
 	limit, err := strconv.ParseInt(limitStr, 10, 32)
 	if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
 	}
 	offset, err := strconv.ParseInt(offsetStr, 10, 32)
 	if err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
+	}
+	
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset <= 0 {
+		offset = 0
 	}
 
 	monitors, err := h.service.GetAllMonitors(ctx, userID, int32(limit), int32(offset))
@@ -186,7 +196,7 @@ func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
 		Monitors: m,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, "", resp)
+	utils.WriteJSON(w, http.StatusOK, reqID, "monitors retrived", resp)
 }
 
 // Patch : /monitors/{monitorID}
@@ -198,33 +208,34 @@ func (h *Handler) UpdateMonitorStatus(w http.ResponseWriter, r *http.Request) {
 	const op string = "handler.monitor.update_monitor_status"
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
+	
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 	userID, err := uuid.Parse(reqClaims.UserID)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
 	mIDStr := chi.URLParam(r, "monitorID")
 	monitorID, err := uuid.Parse(mIDStr)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
 	}
 
 	// decode request body
 	var req UpdateMonitorStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request")
 		return
 	}
 
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
 	}
 
@@ -239,5 +250,5 @@ func (h *Handler) UpdateMonitorStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusOK, "Monitor status updated successfully", "ok")
+	utils.WriteJSON(w, http.StatusOK, reqID, "Monitor status updated successfully", "ok")
 }

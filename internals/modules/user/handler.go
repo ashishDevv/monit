@@ -29,18 +29,17 @@ func NewHandler(service *Service, validator *validator.Validate, logger *zerolog
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	const op string = "handler.user.register"
-
 	ctx := r.Context()
 	reqID := middleware.GetReqID(ctx)
 
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
 	}
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
 	}
 
@@ -59,7 +58,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusCreated, "user registered", id)
+	utils.WriteJSON(w, http.StatusCreated, reqID, "user registered", RegisterResponse{UserID: id.String()})
 }
 
 func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
@@ -69,12 +68,12 @@ func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
 
 	var req LogInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
 	}
 	// valideate request body
 	if err := h.validator.Struct(req); err != nil {
-		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "")
+		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
 	}
 
@@ -96,7 +95,7 @@ func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
 		AccessToken: res.AccessToken,
 	}
 
-	utils.WriteJSON(w, http.StatusCreated, "user registered", result)
+	utils.WriteJSON(w, http.StatusOK, reqID, "user registered", result)
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -106,12 +105,12 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user unauthorised")
 		return
 	}
 	userID, err := uuid.Parse(reqClaims.UserID)
 	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "")
+		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user unauthorised")
 		return
 	}
 
@@ -133,5 +132,5 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		IsPaidUser:    user.IsPaidUser,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, "profile retrived", u)
+	utils.WriteJSON(w, http.StatusOK, reqID, "profile retrived", u)
 }
