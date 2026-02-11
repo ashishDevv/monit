@@ -3,6 +3,8 @@
 env.yaml
 *.md
 keys/
+docs
+MVC
 .env
 *.log
 log.json
