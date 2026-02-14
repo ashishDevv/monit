@@ -1,7 +1,6 @@
 # for golang project
 
 env.yaml
-*.md
 .zed/
 keys/
 docs/
