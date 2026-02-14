@@ -2,7 +2,6 @@ package result
 
 import (
 	"context"
-	"errors"
 	"project-k/internals/modules/executor"
 	"project-k/pkg/apperror"
 	"project-k/pkg/db"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rs/zerolog"
 )
@@ -44,7 +42,7 @@ func (r *MonitorIncidentRepository) Create(ctx context.Context, startTime time.T
 		return nil
 	}
 
-	return utils.WrapRepoError(op, err, r.logger)
+	return utils.WrapRepoError(op, err, false, r.logger)
 }
 
 func (r *MonitorIncidentRepository) GetByID(ctx context.Context, incidentID uuid.UUID) (MonitorIncident, error) {
@@ -64,27 +62,26 @@ func (r *MonitorIncidentRepository) GetByID(ctx context.Context, incidentID uuid
 		}, nil
 	}
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		return MonitorIncident{}, &apperror.Error{
-			Kind:    apperror.NotFound,
-			Op:      op,
-			Message: "monitor incident not found",
-		}
-	}
-
-	return MonitorIncident{}, utils.WrapRepoError(op, err, r.logger)
+	return MonitorIncident{}, utils.WrapRepoError(op, err, true, r.logger)
 }
 
 func (r *MonitorIncidentRepository) CloseIncident(ctx context.Context, monitorID uuid.UUID, endTime time.Time) error {
 	const op string = "repo.monitor_incident.close_incident"
-	
-	_, err := r.querier.CloseMonitorIncident(ctx, db.CloseMonitorIncidentParams{
+
+	rowsAffected, err := r.querier.CloseMonitorIncident(ctx, db.CloseMonitorIncidentParams{
 		MonitorID: utils.ToPgUUID(monitorID),
-		EndTime: utils.ToPgTimestamptz(endTime),
+		EndTime:   utils.ToPgTimestamptz(endTime),
 	})
 	if err == nil {
+		if rowsAffected == 0 {
+			return &apperror.Error{
+				Kind:    apperror.NotFound,
+				Op:      op,
+				Message: "resource not found",
+			}
+		}
 		return nil
 	}
-	
-	return utils.WrapRepoError(op, err, r.logger)
+
+	return utils.WrapRepoError(op, err, false, r.logger)
 }

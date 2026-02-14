@@ -1,18 +1,30 @@
 package middle
 
-// type AuthorizationMiddleware struct {
-//     Policy PolicyService
-// }
+import (
+	"net/http"
+	"project-k/pkg/apperror"
+	"project-k/pkg/utils"
 
-// func (a *AuthorizationMiddleware) Handle(next http.Handler) http.Handler {
-//     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//         user := r.Context().Value(userKey).(*User)
+	"github.com/go-chi/chi/v5/middleware"
+)
 
-//         if !a.Policy.CanAccess(user, r.URL.Path) {
-//             http.Error(w, "forbidden", http.StatusForbidden)
-//             return
-//         }
+func AllowAdmin(next http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		reqID := middleware.GetReqID(ctx)
+		_, ok := UserFromContext(ctx)
+		if !ok {
+			utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user is unauthorised")
+			return
+		}
+ 
+		// if claims.Role != "admin" {    // will add Role field later
+		// 	utils.WriteError(w, http.StatusForbidden, reqID, apperror.Forbidden, "user do not have access")
+		// 	return
+		// }
 
-//         next.ServeHTTP(w, r)
-//     })
-// }
+		next.ServeHTTP(w, r)
+	}
+
+	return http.HandlerFunc(fn)
+}

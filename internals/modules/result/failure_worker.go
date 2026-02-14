@@ -17,17 +17,22 @@ func (rp *ResultProcessor) failureWorker() {
 func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 	ctx := rp.ctx
 	reschedule := true
-	
+
 	rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Failure occured in monitor check")
 
 	defer func() {
+		// 1. Acknowledge Job (Remove from inflight)
+		if err := rp.redisSvc.AckJob(ctx, r.MonitorID.String()); err != nil {
+			rp.logger.Error().Err(err).Str("monitor_id", r.MonitorID.String()).Msg("failed to ack job in redis")
+		}
+
 		if reschedule {
 			rp.monitorSvc.ScheduleMonitor(ctx, r.MonitorID, r.IntervalSec, "result.failure_worker")
 		}
 	}()
 
 	// Case 1 => stop monitoring : No Re-schedule
-	if r.Reason == "INVALID_REQUEST" || r.Reason == "DNS_FAILURE" {   // these should have failure type, not String
+	if r.Reason == "INVALID_REQUEST" || r.Reason == "DNS_FAILURE" { // these should have failure type, not String
 		rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Failure is Terminal, notify user")
 		if err := rp.redisSvc.StoreStatus(ctx, r.MonitorID, r.Status, r.LatencyMs, r.CheckedAt); err != nil {
 			rp.logger.Error().Err(err).Msg("failed to store status in redis")
@@ -48,7 +53,7 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 			return
 		}
 
-		if retryCount <= 2 {    // specify this in config
+		if retryCount <= 2 { // specify this in config
 			reschedule = false
 			rp.monitorSvc.ScheduleMonitor(ctx, r.MonitorID, 5, "result.failure_worker")
 			// this method handles everything and reliable
@@ -75,7 +80,7 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 		rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Int64("fail_count", failCount).Msg("Fail count is less than threshold")
 		return
 	}
-	
+
 	rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Int64("fail_count", failCount).Msg("Fail count is greater than threshold, will alert and create DB incident")
 
 	// Atomic alert decision
@@ -84,18 +89,18 @@ func (rp *ResultProcessor) handleFailure(r executor.HTTPResult) {
 		rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Monitor already alerted")
 		return
 	}
-	
+
 	rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Now we alert Monitor")
 
 	if err := rp.redisSvc.MarkDBIncidentCreated(ctx, r.MonitorID); err != nil {
 		rp.logger.Error().Err(err).Msg("failed to mark db_incident")
 	}
-	
+
 	if err := rp.incidentRepo.Create(ctx, time.Now(), r); err != nil {
 		rp.logger.Error().Err(err).Msg("failed to create incident in DB")
 	}
 	rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Created incident in DB")
-	
+
 	rp.alertChan <- alert.AlertEvent{MonitorID: r.MonitorID}
 	rp.logger.Info().Str("monitor_id", r.MonitorID.String()).Msg("Send Alert to alert channel")
 }

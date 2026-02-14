@@ -2,14 +2,11 @@ package monitor
 
 import (
 	"context"
-	"errors"
 	"project-k/pkg/apperror"
 	"project-k/pkg/db"
 	"project-k/pkg/utils"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 )
 
@@ -41,42 +38,7 @@ func (r *Repository) Create(ctx context.Context, monitor CreateMonitorCmd) (uuid
 		return utils.FromPgUUID(monitorID), nil
 	}
 
-	// from here we handle errors
-
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return uuid.UUID{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		r.log.Error().
-			Str("code", pgErr.Code).
-			Str("constraint", pgErr.ConstraintName).
-			Str("table", pgErr.TableName).
-			Err(err).
-			Msg("database error")
-
-		return uuid.UUID{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return uuid.UUID{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return uuid.UUID{}, utils.WrapRepoError(op, err, false, r.log)
 }
 
 func (r *Repository) GetByID(ctx context.Context, monitorID uuid.UUID) (Monitor, error) {
@@ -96,44 +58,8 @@ func (r *Repository) GetByID(ctx context.Context, monitorID uuid.UUID) (Monitor,
 			AlertEmail:         utils.FromPgText(monitor.AlertEmail),
 		}, nil
 	}
-	// handle errors
 
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// if no row present
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.NotFound,
-			Op:      op,
-			Message: "Monitor not found",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return Monitor{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return Monitor{}, utils.WrapRepoError(op, err, true, r.log)
 }
 
 func (r *Repository) Get(ctx context.Context, userID, monitorID uuid.UUID) (Monitor, error) {
@@ -157,44 +83,7 @@ func (r *Repository) Get(ctx context.Context, userID, monitorID uuid.UUID) (Moni
 		}, nil
 	}
 
-	// handle errors
-
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// if no row present
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.NotFound,
-			Op:      op,
-			Message: "Monitor not found",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return Monitor{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return Monitor{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return Monitor{}, utils.WrapRepoError(op, err, true, r.log)
 }
 
 func (r *Repository) GetAll(ctx context.Context, userID uuid.UUID, limit int32, offset int32) ([]Monitor, error) {
@@ -238,34 +127,7 @@ func (r *Repository) GetAll(ctx context.Context, userID uuid.UUID, limit int32, 
 	// 	}
 	// }
 
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return []Monitor{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return []Monitor{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return []Monitor{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
-
+	return []Monitor{}, utils.WrapRepoError(op, err, false, r.log)
 }
 
 // SetEnabled can enable or disable the monitor in DB, To enable, pass enable parameter as true, To disable pass it as false
@@ -282,37 +144,11 @@ func (r *Repository) SetEnabled(ctx context.Context, userID, monitorID uuid.UUID
 			return &apperror.Error{
 				Kind:    apperror.NotFound,
 				Op:      op,
-				Message: "monitor not found",
+				Message: "resource not found",
 			}
 		}
 		return nil
 	}
 
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return utils.WrapRepoError(op, err, false, r.log)
 }

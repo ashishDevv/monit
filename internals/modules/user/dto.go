@@ -9,9 +9,9 @@ type GetProfileResponse struct {
 }
 
 type RegisterRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name     string `json:"name" validate:"required,gte=3,lte=60"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,gte=8,lte=60"`
 }
 
 type RegisterResponse struct {
@@ -19,11 +19,11 @@ type RegisterResponse struct {
 }
 
 type LogInRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,gte=8,lte=60"`
 }
 
 type LogInResponse struct {
-	UserID string `json:"user_id"`
+	UserID      string `json:"user_id"`
 	AccessToken string `json:"access_token"`
 }

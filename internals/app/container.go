@@ -11,6 +11,7 @@ import (
 	"project-k/internals/modules/scheduler"
 	"project-k/internals/modules/user"
 	"project-k/internals/security"
+	"project-k/pkg/httpclient"
 	"project-k/pkg/redisstore"
 
 	"github.com/go-playground/validator/v10"
@@ -26,6 +27,7 @@ type Container struct {
 	userHandler    *user.Handler
 	monitorHandler *monitor.Handler
 	authMW         *middle.AuthMiddleware
+	Reclaimer      *scheduler.Reclaimer
 	Scheduler      *scheduler.Scheduler
 	Executor       *executor.Executor
 	ResultPro      *result.ResultProcessor
@@ -53,11 +55,14 @@ func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, log
 	incidentRepo := result.NewMonitorIncidentRepo(db, logger)
 	userRepo := user.NewRepository(db, logger)
 
+	httpClient := httpclient.NewHttpClient()
+
 	userService := user.NewService(userRepo, tokenSvc)
 	monitorSvc := monitor.NewService(monitorRepo, redisClient, userService, logger)
 
+	reclaimer := scheduler.NewReclaimer(ctx, &cfg.Reclaimer, redisClient, logger)
 	sch := scheduler.NewScheduler(ctx, &cfg.Scheduler, jobChan, redisClient, logger)
-	exec := executor.NewExecutor(ctx, &cfg.Executor, jobChan, resultChan, monitorSvc, logger)
+	exec := executor.NewExecutor(ctx, &cfg.Executor, jobChan, resultChan, monitorSvc, httpClient, logger)
 	resultPro := result.NewResultProcessor(ctx, &cfg.ResultProcessor, redisClient, resultChan, incidentRepo, monitorSvc, alertChan, logger)
 	alertSvc := alert.NewAlertService(&cfg.Alert, alertChan, logger)
 
@@ -74,6 +79,7 @@ func NewContainer(ctx context.Context, db *pgxpool.Pool, cfg *config.Config, log
 		userHandler:    userHandler,
 		authMW:         authMW,
 		monitorHandler: monitorHandler,
+		Reclaimer:      reclaimer,
 		Scheduler:      sch,
 		Executor:       exec,
 		ResultPro:      resultPro,

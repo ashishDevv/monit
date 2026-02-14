@@ -15,8 +15,14 @@ type AppConfig struct {
 }
 
 type SchedulerConfig struct {
-	Interval  time.Duration `mapstructure:"interval" validate:"gte=5"` // should be in sec
-	BatchSize int           `mapstructure:"batch_size" validate:"gt=0"`
+	Interval          time.Duration `mapstructure:"interval" validate:"gte=5"` // should be in sec
+	BatchSize         int           `mapstructure:"batch_size" validate:"gt=0"`
+	VisibilityTimeout time.Duration `mapstructure:"visibility_timeout" validate:"gt=0"` // should be in sec
+}
+
+type ReclaimerConfig struct {
+	Interval time.Duration `mapstructure:"interval" validate:"gte=5"` // should be in sec
+	Limit    int           `mapstructure:"limit" validate:"gt=0"`
 }
 
 type ExecutorConfig struct {
@@ -65,6 +71,7 @@ type Config struct {
 	Auth            AuthConfig            `mapstructure:"auth" validate:"required"`
 	App             AppConfig             `mapstructure:"app" validate:"required"`
 	Scheduler       SchedulerConfig       `mapstructure:"scheduler" validate:"required"`
+	Reclaimer       ReclaimerConfig       `mapstructure:"reclaimer" validate:"required"`
 	Executor        ExecutorConfig        `mapstructure:"executor" validate:"required"`
 	Alert           AlertConfig           `mapstructure:"alert" validate:"required"`
 	ResultProcessor ResultProcessorConfig `mapstructure:"result_processor" validate:"required"`

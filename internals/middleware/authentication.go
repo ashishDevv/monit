@@ -16,11 +16,19 @@ import (
 	"project-k/pkg/apperror"
 	"project-k/pkg/utils"
 	"strings"
+
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 )
 
 type userCtxKeyType struct{}
 
 var userCtxKey = userCtxKeyType{}
+
+type AuthenticatedUser struct {
+	UserID uuid.UUID
+	Email  string
+}
 
 type AuthMiddleware struct {
 	tokenSvc *security.TokenService
@@ -34,29 +42,43 @@ func NewAuthMiddleware(tokenSvc *security.TokenService) *AuthMiddleware {
 
 func (a *AuthMiddleware) Handle(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		reqID := middleware.GetReqID(ctx)
 
 		token, err := a.extractBearerToken(r)
 		if err != nil {
-			utils.WriteError(w, http.StatusUnauthorized, "", apperror.Unauthorised, err.Error())
+			utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, err.Error())
 			return
 		}
 
 		claims, err := a.tokenSvc.ValidateAccessToken(token)
 		if err != nil {
-			utils.FromAppError(w, "", err)
+			utils.FromAppError(w, reqID, err)
 			return
 		}
 
 		// Extra safety checks (optional but recommended)
 		if claims.UserID == "" || claims.Email == "" {
-			utils.WriteError(w, http.StatusUnauthorized, "", apperror.Unauthorised, "user is unauhorised")
+			utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user is unauthorised")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userCtxKey, claims)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// Parse UUID here 
+		userID, err := uuid.Parse(claims.UserID)
+		if err != nil {
+			utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user is unauthorised")
+			return
+		}
+		
+		authUser := &AuthenticatedUser{
+			UserID: userID,
+			Email:  claims.Email,
+		}
+
+		newCtx := context.WithValue(ctx, userCtxKey, authUser)
+		next.ServeHTTP(w, r.WithContext(newCtx))
 	}
-	
+
 	return http.HandlerFunc(fn)
 }
 
@@ -75,7 +97,7 @@ func (_ *AuthMiddleware) extractBearerToken(r *http.Request) (string, error) {
 	return parts[1], nil
 }
 
-func UserFromContext(ctx context.Context) (*security.RequestClaims, bool) {
-	claims, ok := ctx.Value(userCtxKey).(*security.RequestClaims)
-	return claims, ok
+func UserFromContext(ctx context.Context) (*AuthenticatedUser, bool) {
+	user, ok := ctx.Value(userCtxKey).(*AuthenticatedUser)
+	return user, ok
 }
