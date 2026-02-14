@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"os/signal"
 	"project-k/config"
 	"project-k/internals/app"
@@ -15,6 +16,9 @@ import (
 func main() {
 	// Load envs
 	cfg, err := config.LoadConfig("env.yaml")
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 	// Get Context with signals attached -> when ever a signal occurs , then `Done` channel of ctx will get closed
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -39,14 +43,16 @@ func main() {
 	log.Info().Msg("dependencies initialized")
 
 	// start our heroes
+	// start reclaimer
+	go container.Reclaimer.Run()
 	// start scheduler
-	container.Scheduler.StartScheduler()
+	go container.Scheduler.Run()
 	// start executor
 	container.Executor.StartWorkers()
 	// start result processor
 	container.ResultPro.StartResultProcessor()
 	// start alert service
-	container.AlertSvc.Start()
+	container.AlertSvc.Run()
 
 	// all heroes are initialized
 	log.Info().Msg("all heroes initialized")
@@ -70,8 +76,8 @@ func main() {
 	}
 
 	// 2. Shutdown background workers & infra
-	_, cancle := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
-	defer cancle()
+	_, cancel := context.WithTimeout(context.Background(), 30*time.Second) // this is new context, acts as buffer time to close all resources
+	defer cancel()
 
 	if err := container.Shutdown(); err != nil {
 		log.Error().Err(err).Msg("dependecies shutdown failed")

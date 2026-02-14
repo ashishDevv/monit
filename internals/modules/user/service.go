@@ -32,7 +32,7 @@ func (s *Service) Register(ctx context.Context, data CreateUserCmd) (uuid.UUID, 
 
 	id, err := s.repo.CreateUser(ctx, data)
 	if err != nil {
-		return uuid.UUID{}, nil
+		return uuid.UUID{}, err
 	}
 	return id, nil
 }

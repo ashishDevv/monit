@@ -5,6 +5,7 @@ import (
 	"net/http"
 )
 
+// Currently its unused, but I am thinking a usecase for this
 func HTTPStatus(err error) int {
 	var e *Error
 	if !errors.As(err, &e) {

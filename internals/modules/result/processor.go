@@ -72,13 +72,14 @@ func NewResultProcessor(
 func (rp *ResultProcessor) StartResultProcessor() {
 	// first
 	// start success and failure workers
-	rp.workerWG.Add(rp.successWorkerCount + rp.failureWorkerCount) // add for all as we have to wait for each worker to complete
 
 	for range rp.successWorkerCount { // specify in config
+		rp.workerWG.Add(1)
 		go rp.successWorker()
 	}
 
 	for range rp.failureWorkerCount { // specify in config
+		rp.workerWG.Add(1)
 		go rp.failureWorker()
 	}
 
@@ -112,37 +113,23 @@ func (rp *ResultProcessor) cleanupRedis(ctx context.Context, monitorID uuid.UUID
 	// rp.redisSvc.ClearRetry(ctx, monitorID)
 }
 
-// func (rp *ResultProcessor) successWorker() {
-// 	for r := range rp.successChan {
-// 		rp.storeSuccessInRedis(r)
-// 	}
-// }
 
-// func (rp *ResultProcessor) failureWorker() {
-// 	for r := range rp.failureChan {
-// 		rp.handleFailure(r)
-// 	}
-// }
+/*
+   Success Worker Workflow
 
-// func (rp *ResultProcessor) storeSuccessInRedis(httpResult executionworker.HTTPResult) {
+   1. Clear retry count
+   2. Clear incident count
+   3. Update status in Redis
+   4. Schedule next run
 
-// 	// - Update status in Redis
-// 	// - Clear retry
-// 	// - Clear incident (if any)
-// 	// - next_run = now + interval
-// 	// - ZADD monitor:schedule next_run
-// }
+   Failure Worker Workflow
 
-// func (rp *ResultProcessor) handleFailure(httpResult executionworker.HTTPResult) {
-// 	if httpResult.Retryable {
-// - increment retry count
-// - next_run = now + retry_delay
-// - Redis ZADD(next_run)
-// 	}
-
-// now its a real fault for client, so create a inicident
-// - increment incident
-// - maybe alert
-// - next_run = now + interval
-// - Redis ZADD(next_run)
-// }
+   1. If retryable:
+      a. Increment retry count
+      b. Schedule next run with backoff
+   2. Else:
+      a. Increment incident count
+      b. Create incident
+      c. Alert
+      d. Schedule next run
+*/

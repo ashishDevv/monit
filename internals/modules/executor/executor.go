@@ -25,6 +25,7 @@ type Executor struct {
 	// lifecycle
 	ctx         context.Context
 	workerCount int // specify it in config
+	workerWg    sync.WaitGroup
 
 	// channels
 	jobChan    chan scheduler.JobPayload
@@ -48,6 +49,7 @@ func NewExecutor(
 	jobChan chan scheduler.JobPayload,
 	resultChan chan HTTPResult,
 	monitorSvc MonitorService,
+	httpClient *http.Client,
 	logger *zerolog.Logger,
 ) *Executor {
 
@@ -58,7 +60,7 @@ func NewExecutor(
 		resultChan:  resultChan,
 		monitorSvc:  monitorSvc,
 		httpSem:     make(chan struct{}, executorConfig.HTTPSemCount), // 5k http concurrent , specify it in config
-		httpClient:  newHttpClient(),
+		httpClient:  httpClient,
 		logger:      logger,
 	}
 }
@@ -66,6 +68,7 @@ func NewExecutor(
 // StartWorkers starts the Executor workers
 func (ew *Executor) StartWorkers() {
 	for range ew.workerCount { // 100  , -> 5mb
+		ew.workerWg.Add(1)
 		go ew.startWork()
 	}
 
@@ -73,6 +76,7 @@ func (ew *Executor) StartWorkers() {
 }
 
 func (ew *Executor) startWork() {
+	defer ew.workerWg.Done()
 
 	for job := range ew.jobChan {
 		ew.logger.Info().Str("monitor_id", job.MonitorID.String()).Msg("New job in Job Channel")
@@ -81,17 +85,17 @@ func (ew *Executor) startWork() {
 		if err != nil { // if err is monitor not found (may be deleted)or any other err , just log and return
 			// if err == not found -> simply return as monitor is deleted
 			if apperror.IsKind(err, apperror.NotFound) {
-				return
+				continue
 			}
 			// if err anything else -> it critical
 			// IT SHOULD BE RE-SCHEDULE
 			// log it
 			ew.monitorSvc.ScheduleMonitor(ew.ctx, job.MonitorID, 5, "executor.start_work")
 			ew.logger.Error().Err(err).Str("monitor_id", job.MonitorID.String()).Msg("error in loading monitor in executor")
-			return
+			continue
 		}
 		if !monitor.Enabled { // monitor is disabled, so dont proceed further
-			return // we not have to do this further
+			continue // we not have to do this further
 		}
 
 		ew.logger.Info().Msg("Monitor Loaded")
@@ -115,6 +119,9 @@ func (ew *Executor) startWork() {
 
 // Stop waits for all workers and http gourotines to complete
 func (ew *Executor) Stop() {
+
+	ew.workerWg.Wait()
+	
 	ew.httpWg.Wait()
 }
 

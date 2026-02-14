@@ -39,11 +39,6 @@ func (h *Handler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
-	userID, err := uuid.Parse(reqClaims.UserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
-		return
-	}
 
 	// decode request body
 	var req CreateMonitorRequest
@@ -52,14 +47,14 @@ func (h *Handler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// valideate request body
+	// validate request body
 	if err := h.validator.Struct(req); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request")
 		return
 	}
 
 	mID, err := h.service.CreateMonitor(ctx, CreateMonitorCmd{
-		UserID:             userID,
+		UserID:             reqClaims.UserID,
 		Url:                req.Url,
 		IntervalSec:        req.IntervalSec,
 		TimeoutSec:         req.TimeoutSec,
@@ -76,7 +71,7 @@ func (h *Handler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 		utils.FromAppError(w, reqID, err)
 		return
 	}
-	utils.WriteJSON(w, http.StatusCreated, reqID, "monitor created sucessfully", CreateMonitorResponse{MonitorID: mID.String()})
+	utils.WriteJSON(w, http.StatusCreated, reqID, "monitor created successfully", CreateMonitorResponse{MonitorID: mID.String()})
 }
 
 func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
@@ -89,11 +84,6 @@ func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
-	userID, err := uuid.Parse(reqClaims.UserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
-		return
-	}
 
 	mIDStr := chi.URLParam(r, "monitorID")
 	monitorID, err := uuid.Parse(mIDStr)
@@ -102,7 +92,7 @@ func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mon, err := h.service.GetMonitor(ctx, userID, monitorID)
+	mon, err := h.service.GetMonitor(ctx, reqClaims.UserID, monitorID)
 	if err != nil {
 		h.logger.Error().
 			Str("op", op).
@@ -123,7 +113,7 @@ func (h *Handler) GetMonitor(w http.ResponseWriter, r *http.Request) {
 		Enabled:            mon.Enabled,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, reqID, "moniter retrived", m)
+	utils.WriteJSON(w, http.StatusOK, reqID, "monitor retrieved successfully", m)
 }
 
 // /monitors?offset=3&limit=10
@@ -134,11 +124,6 @@ func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
 	
 	reqClaims, ok := middle.UserFromContext(ctx)
 	if !ok {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
-		return
-	}
-	userID, err := uuid.Parse(reqClaims.UserID)
-	if err != nil {
 		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
@@ -164,7 +149,7 @@ func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	monitors, err := h.service.GetAllMonitors(ctx, userID, int32(limit), int32(offset))
+	monitors, err := h.service.GetAllMonitors(ctx, reqClaims.UserID, int32(limit), int32(offset))
 	if err != nil {
 		h.logger.Error().
 			Str("op", op).
@@ -190,13 +175,13 @@ func (h *Handler) GetAllMonitors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := GetAllMonitorsResponse{
-		UserID:   reqClaims.UserID,
+		UserID:   reqClaims.UserID.String(),
 		Limit:    int32(limit),
 		Offset:   int32(offset),
 		Monitors: m,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, reqID, "monitors retrived", resp)
+	utils.WriteJSON(w, http.StatusOK, reqID, "monitors retrieved successfully", resp)
 }
 
 // Patch : /monitors/{monitorID}
@@ -214,11 +199,7 @@ func (h *Handler) UpdateMonitorStatus(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
 		return
 	}
-	userID, err := uuid.Parse(reqClaims.UserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user Unauthorised")
-		return
-	}
+
 	mIDStr := chi.URLParam(r, "monitorID")
 	monitorID, err := uuid.Parse(mIDStr)
 	if err != nil {
@@ -233,13 +214,13 @@ func (h *Handler) UpdateMonitorStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// valideate request body
+	// validate request body
 	if err := h.validator.Struct(req); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid input")
 		return
 	}
 
-	_, err = h.service.UpdateMonitorStatus(ctx, userID, monitorID, req.Enable)
+	_, err = h.service.UpdateMonitorStatus(ctx, reqClaims.UserID, monitorID, req.Enable)
 	if err != nil {
 		h.logger.Error().
 			Str("op", op).
@@ -250,5 +231,5 @@ func (h *Handler) UpdateMonitorStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusOK, reqID, "Monitor status updated successfully", "ok")
+	utils.WriteJSON(w, http.StatusOK, reqID, "monitor status updated successfully", "ok")
 }

@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,8 +70,8 @@ func (s *Service) GetMonitor(ctx context.Context, userID uuid.UUID, monitorID uu
 
 	const op string = "service.monitor.get_monitor"
 
-	m, exists := s.cache.GetMonitor(ctx, monitorID)
-	if exists && m.UserID == userID {
+	m, err := s.getCachedMonitor(ctx, monitorID)
+	if err == nil && m.UserID == userID {
 		return m, nil
 	}
 
@@ -78,11 +80,11 @@ func (s *Service) GetMonitor(ctx context.Context, userID uuid.UUID, monitorID uu
 		return Monitor{}, err // so just return it
 	}
 
-	if err := s.cache.SetMonitor(ctx, mDB); err != nil {
+	if err := s.cacheMonitor(ctx, mDB); err != nil {
 		s.logger.Error().
 			Str("op", op).
 			Err(err).
-			Msg("error in setting in cache")
+			Msg("error in caching monitor")
 	}
 
 	return mDB, nil
@@ -98,21 +100,20 @@ func (s *Service) LoadMonitor(ctx context.Context, monitorID uuid.UUID) (Monitor
 
 	const op string = "service.monitor.load_monitor"
 
-	m, exists := s.cache.GetMonitor(ctx, monitorID)
-	if exists {
+	m, err := s.getCachedMonitor(ctx, monitorID)
+	if err == nil {
 		return m, nil
 	}
-
 	mDB, err := s.monitorRepo.GetByID(ctx, monitorID)
 	if err != nil {
 		return Monitor{}, err
 	}
 
-	if err := s.cache.SetMonitor(ctx, mDB); err != nil {
+	if err := s.cacheMonitor(ctx, mDB); err != nil {
 		s.logger.Error().
 			Str("op", op).
 			Err(err).
-			Msg("error in setting in cache")
+			Msg("error in caching monitor")
 	}
 
 	return mDB, nil
@@ -192,11 +193,31 @@ func (s *Service) ScheduleMonitor(ctx context.Context, mID uuid.UUID, intervalSe
 
 func (s *Service) disableMonitor(ctx context.Context, monitorID uuid.UUID) {
 	// delete cached monitor (if any)
-	_ = s.cache.DelMonitor(ctx, monitorID)
+	_ = s.cache.DelMonitor(ctx, monitorID.String())
 	// delete scheduled entry
 	_ = s.cache.DelSchedule(ctx, monitorID.String())
 	// delete incident (if any)
 	_ = s.cache.ClearIncident(ctx, monitorID)
 	// delete status entry
 	_ = s.cache.DelStatus(ctx, monitorID)
+}
+
+func (s *Service) cacheMonitor(ctx context.Context, m Monitor) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("failed to marshal monitor for cache: %w", err)
+	}
+	return s.cache.SetMonitor(ctx, m.ID.String(), data, 24*time.Hour)
+}
+
+func (s *Service) getCachedMonitor(ctx context.Context, id uuid.UUID) (Monitor, error) {
+	data, err := s.cache.GetMonitor(ctx, id.String())
+	if err != nil {
+		return Monitor{}, err
+	}
+	var m Monitor
+	if err := json.Unmarshal(data, &m); err != nil {
+		return Monitor{}, err
+	}
+	return m, nil
 }

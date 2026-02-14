@@ -39,8 +39,8 @@ func (s *Server) Start() {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info().Msg("shutting down HTTP server")
 
-	shutdownCtx, cancle := context.WithTimeout(ctx, 10 * time.Second)
-	defer cancle()
+	shutdownCtx, cancel := context.WithTimeout(ctx, 10 * time.Second)
+	defer cancel()
 
 	return s.httpServer.Shutdown(shutdownCtx)
 }

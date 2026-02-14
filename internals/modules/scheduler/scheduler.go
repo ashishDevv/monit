@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"math/rand"
 	"project-k/config"
 	"time"
 
@@ -14,10 +15,11 @@ import (
 
 type Scheduler struct {
 	// lifecycle
-	ctx       context.Context
-	interval  time.Duration
-	ticker    *time.Ticker
-	batchSize int
+	ctx      context.Context
+	interval time.Duration
+	// ticker    *time.Ticker
+	batchSize         int
+	visibilityTimeout time.Duration
 
 	// channels
 	jobChan chan JobPayload
@@ -38,39 +40,131 @@ func NewScheduler(
 ) *Scheduler {
 
 	return &Scheduler{
-		ctx:       ctx,
-		jobChan:   jobChan,
-		redisSvc:  redisSvc,
-		interval:  schedulerConfig.Interval, // It will be in sec
-		batchSize: schedulerConfig.BatchSize,
-		logger:    logger,
+		ctx:               ctx,
+		jobChan:           jobChan,
+		redisSvc:          redisSvc,
+		interval:          schedulerConfig.Interval,  // It will be in sec, 1s is ideal or 2s
+		batchSize:         schedulerConfig.BatchSize, // let say 100 -> 400 -> 1000
+		visibilityTimeout: schedulerConfig.VisibilityTimeout,  // let say 30s
+		logger:            logger,
 	}
 }
 
-// StartScheduler starts the Scheduler
-func (sc *Scheduler) StartScheduler() {
+// Run starts the Scheduler
+func (sc *Scheduler) Run() {
+	if sc.interval <= 0 {
+		panic("scheduler interval must be > 0")
+	}
 	sc.logger.Info().Msg("Scheduler started")
 	ticker := time.NewTicker(sc.interval)
-	sc.ticker = ticker
-
-	go func() {
-		for {
-			select {
-			case <-sc.ctx.Done():
-				sc.ticker.Stop()
-				sc.logger.Info().Msg("Scheduler stopped")
-				return
-
-			case <-ticker.C:
-				// pull jobs from redis
-				sc.logger.Info().Msg("Scheduler Ticked")
-				sc.doWork() // 400 ms
-			}
-		}
+	defer func() {
+		ticker.Stop()
+		sc.logger.Info().Msg("Scheduler stopped")
 	}()
+
+	for {
+		select {
+		case <-sc.ctx.Done():
+			return
+
+		case <-ticker.C:
+			// pull jobs from redis
+			sc.logger.Info().Msg("Scheduler Ticked")
+			sc.doWorkWithReliability()
+		}
+	}
 }
 
+
+
+// new implementation with reliability, this is the final version
+func (sc *Scheduler) doWorkWithReliability() {
+	monitors, err := sc.redisSvc.FetchAndMoveToInflight(sc.ctx, fetchAndMoveToInflightScript, time.Now(), sc.batchSize, sc.visibilityTimeout)
+	if err != nil {
+		// transient redis error → log & move on
+		sc.logger.Error().Err(err).Msg("error to pop scheduled monitors from redis")
+		return
+	}
+	if len(monitors) == 0 {
+		return
+	}
+	sc.logger.Info().Msgf("Scheduler popped %v items", len(monitors))
+	
+	for _, monitor := range monitors {
+		id, err := uuid.Parse(monitor)
+		if err != nil {
+			// corrupted data, skip
+			sc.logger.Error().Err(err).Msg("error in parsing the schedule monitor Id to uuid")
+			continue
+		}
+
+		select {
+		case sc.jobChan <- JobPayload{MonitorID: id}: // has space
+			// success
+		case <-sc.ctx.Done():
+			return
+		default:
+			// jobChan full → backpressure protection
+			// reinsert job so it’s not lost
+			sc.logger.Info().Msg("Applying backpressure and re-scheduling")
+			backoff := time.Now().Add(sc.addJitter(2 * time.Second))
+			if err := sc.redisSvc.Schedule(sc.ctx, monitor, backoff); err != nil {
+				sc.logger.Error().Err(err).Msg("error in scheduling monitor")
+				// enqueue in queue
+			}
+		}
+	}
+}
+
+// new implementation without reliability, keep it for comparison, and benchmarking
 func (sc *Scheduler) doWork() {
+
+	monitors, err := sc.redisSvc.FetchDueMonitors(sc.ctx, fetchDueMonitorsScript, time.Now(), sc.batchSize)
+	if err != nil {
+		// transient redis error → log & move on
+		sc.logger.Error().Err(err).Msg("error to pop scheduled monitors from redis")
+		return
+	}
+
+	if len(monitors) == 0 {
+		return
+	}
+
+	sc.logger.Info().Msgf("Scheduler popped %v items", len(monitors))
+
+	for _, monitor := range monitors {
+		id, err := uuid.Parse(monitor)
+		if err != nil {
+			// corrupted data, skip
+			sc.logger.Error().Err(err).Msg("error in parsing the schedule monitor Id to uuid")
+			continue
+		}
+
+		select {
+		case sc.jobChan <- JobPayload{MonitorID: id}: // has space
+			// success
+		case <-sc.ctx.Done():
+			return
+		default:
+			// jobChan full → backpressure protection
+			// reinsert job so it’s not lost
+			sc.logger.Info().Msg("Applying backpressure and re-scheduling")
+			backoff := time.Now().Add(sc.addJitter(2 * time.Second))
+			if err := sc.redisSvc.Schedule(sc.ctx, monitor, backoff); err != nil {
+				sc.logger.Error().Err(err).Msg("error in scheduling monitor")
+				// enqueue in queue
+			}
+		}
+	}
+}
+
+func (sc *Scheduler) addJitter(d time.Duration) time.Duration {
+	jitter := time.Duration(rand.Int63n(int64(d / 10)))
+	return d + jitter
+}
+
+// old implementation, keep it for comparison, and benchmarking with new implementation, if version-1
+func (sc *Scheduler) doWorkOld() { 
 	now := time.Now().Unix()
 
 	items, err := sc.redisSvc.PopDue(sc.ctx, sc.batchSize) // 5000,  pr => 95%,  100 non valid

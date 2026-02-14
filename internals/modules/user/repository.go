@@ -8,7 +8,6 @@ import (
 	"project-k/pkg/utils"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
 )
@@ -37,7 +36,7 @@ func (r *repository) CreateUser(ctx context.Context, user CreateUserCmd) (uuid.U
 		return utils.FromPgUUID(id), nil
 	}
 
-	// from here we handle errors
+	// from here we handle errors -> it should be handled as it is as it has a unique constraint
 
 	// Context errors
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -59,7 +58,6 @@ func (r *repository) CreateUser(ctx context.Context, user CreateUserCmd) (uuid.U
 				Message: "user already exists",
 			}
 		}
-
 		r.logger.Error().
 			Str("code", pgErr.Code).
 			Str("constraint", pgErr.ConstraintName).
@@ -100,50 +98,7 @@ func (r *repository) GetUserByID(ctx context.Context, userID uuid.UUID) (User, e
 		}, nil
 	}
 
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return User{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// if no row present
-	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, &apperror.Error{
-			Kind:    apperror.NotFound,
-			Op:      op,
-			Message: "Monitor not found",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		// log it
-		r.logger.Error().
-			Str("code", pgErr.Code).
-			Str("constraint", pgErr.ConstraintName).
-			Str("table", pgErr.TableName).
-			Err(err).
-			Msg("database error")
-
-		return User{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return User{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return User{}, utils.WrapRepoError(op, err, true, r.logger)
 }
 
 func (r *repository) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -159,50 +114,7 @@ func (r *repository) GetUserByEmail(ctx context.Context, email string) (User, er
 		}, nil
 	}
 
-	// Context errors
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return User{}, &apperror.Error{
-			Kind:    apperror.RequestTimeout,
-			Op:      op,
-			Message: "request cancelled or timed out",
-		}
-	}
-
-	// if no row present
-	if errors.Is(err, pgx.ErrNoRows) {
-		return User{}, &apperror.Error{
-			Kind:    apperror.NotFound,
-			Op:      op,
-			Message: "User not found",
-		}
-	}
-
-	// postgres errors
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		// log it
-		r.logger.Error().
-			Str("code", pgErr.Code).
-			Str("constraint", pgErr.ConstraintName).
-			Str("table", pgErr.TableName).
-			Err(err).
-			Msg("database error")
-
-		return User{}, &apperror.Error{
-			Kind:    apperror.DatabaseErr,
-			Op:      op,
-			Message: "internal server error",
-			Err:     err,
-		}
-	}
-
-	// other errors
-	return User{}, &apperror.Error{
-		Kind:    apperror.Internal,
-		Op:      op,
-		Message: "internal server error",
-		Err:     err,
-	}
+	return User{}, utils.WrapRepoError(op, err, true, r.logger)
 }
 
 func (r *repository) IncrementMonitorCount(ctx context.Context, userID uuid.UUID) error {
@@ -220,5 +132,5 @@ func (r *repository) IncrementMonitorCount(ctx context.Context, userID uuid.UUID
 		return nil
 	}
 
-	return utils.WrapRepoError(op, err, r.logger)
+	return utils.WrapRepoError(op, err, false, r.logger)
 }

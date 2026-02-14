@@ -29,7 +29,7 @@ func NewAlertService(alertConfig *config.AlertConfig, alertChan chan AlertEvent,
 }
 
 // Starts starts the Alert Service
-func (s *AlertService) Start() {
+func (s *AlertService) Run() {
 
 	s.workerWG.Add(s.workerCount)
 

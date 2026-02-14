@@ -34,5 +34,5 @@ func (c *Client) GetStatus(ctx context.Context, monitorID uuid.UUID) (map[string
 func (c *Client) DelStatus(ctx context.Context, monitorID uuid.UUID) error {
 	key := fmt.Sprintf("monitor:status:%v",monitorID)
 
-	return c.rdb.HDel(ctx, key).Err()
+	return c.rdb.Del(ctx, key).Err()
 }

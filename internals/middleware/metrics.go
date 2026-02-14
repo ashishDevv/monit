@@ -1,22 +1,29 @@
 package middle
 
-// import (
-// 	"net/http"
-// 	"time"
-// )
+import (
+	"net/http"
+	"time"
+)
 
-// func Metrics(recorder MetricsRecorder) func(http.Handler) http.Handler {
-// 	return func(next http.Handler) http.Handler {
-// 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-// 			start := time.Now()
+// This middlware will be used in future to collect metrics
 
-// 			next.ServeHTTP(w, r)
+type MetricsRecorder interface {
+	Observe(method, path string, duration time.Duration)
+}
 
-// 			recorder.Observe(
-// 				r.Method,
-// 				r.URL.Path,
-// 				time.Since(start),
-// 			)
-// 		})
-// 	}
-// }
+func Metrics(recorder MetricsRecorder) Middleware {
+	return func(next http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			next.ServeHTTP(w, r)
+
+			recorder.Observe(
+				r.Method,
+				r.URL.Path,
+				time.Since(start),
+			)
+		}
+		return http.HandlerFunc(fn)
+	}
+}

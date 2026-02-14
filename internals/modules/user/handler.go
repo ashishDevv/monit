@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -37,7 +36,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
 	}
-	// valideate request body
+	// validate request body
 	if err := h.validator.Struct(req); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, reqID, apperror.InvalidInput, "invalid request body")
 		return
@@ -58,7 +57,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusCreated, reqID, "user registered", RegisterResponse{UserID: id.String()})
+	utils.WriteJSON(w, http.StatusCreated, reqID, "user registered successfully", RegisterResponse{UserID: id.String()})
 }
 
 func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +94,7 @@ func (h *Handler) LogIn(w http.ResponseWriter, r *http.Request) {
 		AccessToken: res.AccessToken,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, reqID, "user registered", result)
+	utils.WriteJSON(w, http.StatusOK, reqID, "user logged in successfully", result)
 }
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -108,13 +107,8 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user unauthorised")
 		return
 	}
-	userID, err := uuid.Parse(reqClaims.UserID)
-	if err != nil {
-		utils.WriteError(w, http.StatusUnauthorized, reqID, apperror.Unauthorised, "user unauthorised")
-		return
-	}
 
-	user, err := h.service.GetProfile(ctx, userID)
+	user, err := h.service.GetProfile(ctx, reqClaims.UserID)
 	if err != nil {
 		h.logger.Error().
 			Str("op", op).
@@ -132,5 +126,5 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		IsPaidUser:    user.IsPaidUser,
 	}
 
-	utils.WriteJSON(w, http.StatusOK, reqID, "profile retrived", u)
+	utils.WriteJSON(w, http.StatusOK, reqID, "profile retrieved successfully", u)
 }
