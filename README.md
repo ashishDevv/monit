@@ -1,6 +1,6 @@
 # Monit — Distributed Uptime Monitoring System
 
-A **high-performance, fault-tolerant** uptime monitoring service built in Go, designed to handle **1M+ monitoring jobs** with distributed Redis-based scheduling, atomic Lua scripts, and a channel-based worker pipeline.
+A **high-performance, fault-tolerant, scalable, reliable** uptime monitoring service built in Go, designed to handle **1M+ monitoring jobs with a single server** with distributed Redis-based scheduling, atomic Lua scripts, and a channel-based worker pipeline
 
 ## Table of Contents
 
@@ -38,13 +38,40 @@ Monit is a production-grade website monitoring service that continuously checks 
 
 ### Key Properties
 
-| Property | How It's Achieved |
-|---|---|
-| **Highly Scalable** | Channel-based pipeline, configurable worker pools, Redis sorted sets for O(log N) scheduling |
-| **Highly Reliable** | Lua-script atomicity, inflight visibility timeouts, automatic job reclamation |
-| **Fault Tolerant** | Graceful shutdown, ordered channel closure, retry with backoff, backpressure protection |
-| **High Performance** | Redis caching eliminates DB reads on hot path, HTTP semaphore caps concurrent connections |
-| **Maintainable** | Clean module boundaries, DI container, custom error handling, idiomatic Go |
+#### Highly Scalable
+
+- **Channel-based pipeline architecture** — each stage (Scheduler → Executor → Result Processor → Alert Service) is connected via buffered Go channels, allowing independent scaling of each stage
+- **Configurable worker pools** — the number of executor workers, HTTP workers, success/failure workers, and alert workers are all configurable, so you can scale each pool independently based on bottlenecks
+- **Redis sorted sets for O(log N) scheduling** — finding due jobs among 1M monitors is logarithmic, not linear. A database `SELECT WHERE next_run <= NOW()` would require a full table scan
+- **Horizontal scaling support** — multiple instances can run simultaneously because Lua scripts guarantee atomic job dispatch, so no two instances ever grab the same job
+
+#### Highly Reliable
+
+- **Lua script atomicity** — all scheduling operations (fetch due jobs, move to inflight, reclaim stalled jobs) are executed as atomic Lua scripts on Redis, eliminating race conditions across distributed instances
+- **Inflight visibility timeout** — every dispatched job is tracked in an inflight sorted set with a timeout score. If a worker doesn't acknowledge the job within the timeout, the system automatically considers it lost
+- **Automatic job reclamation** — the Reclaimer runs independently on a ticker, scanning for expired inflight jobs and atomically moving them back to the schedule set for re-execution
+- **HSETNX for alert deduplication** — even with multiple failure workers processing the same monitor's failures, `MarkIncidentAlertedIfNotSet` uses Redis `HSETNX` to ensure only one worker triggers the alert
+
+#### Fault Tolerant
+
+- **Graceful shutdown with ordered channel closure** — channels are closed in strict dependency order (`jobChan` → executor stop → `resultChan` → result processor wait → `alertChan` → alert service wait), ensuring every in-flight message is fully processed before the process exits
+- **Backpressure protection** — if the executor can't keep up and `jobChan` is full, the scheduler reschedules jobs with a 2-second backoff + random jitter instead of dropping them
+- **Retry with exponential backoff** — all Redis operations use a `retry()` helper with progressive delays (50ms, 100ms, 150ms), and the result processor retries failed HTTP checks before escalating to incidents
+-  **Robust Error handling** — all the errors related to databases, redis, services are handling properly with a custom error type , this ensures separation of concern, security, easier debugging, and robust system.
+
+#### High Performance
+
+- **Redis caching eliminates DB reads on the hot path** — monitor configuration is cached in Redis with a 24-hour TTL. At 1 Million checks/min, this avoids ~16,666 PostgreSQL queries/second for config lookups. Cache hits are sub-millisecond vs. 1-5ms for database queries
+- **HTTP semaphore caps concurrent connections** — a `chan struct{}` of configurable size (e.g., 5000) prevents file descriptor exhaustion and allows precise control over outbound network pressure
+- **Batch operations** — Lua scripts fetch up to `batchSize` jobs per tick in a single Redis roundtrip, and `ScheduleBatch()` uses multi-member `ZADD` to schedule many jobs in one call
+- **Connection pool tuning** — both Redis and PostgreSQL pools are fully configurable (pool size, idle connections, max lifetime) to optimize for the deployment environment
+
+#### Highly Maintainable
+
+- **Clean module boundaries** — each domain module (`user`, `monitor`, `scheduler`, `executor`, `result`, `alert`) is self-contained with its own handler, service, repository, and types
+- **Dependency injection via Container** — a single `Container` struct in `internals/app` wires all dependencies, making it trivial to trace the dependency graph and modify it
+- **Custom structured error handling** — the `apperror` package provides `Kind`, `Op`, and wrapped errors that flow cleanly from repository → service → handler → HTTP response
+- **Idiomatic Go patterns** — interfaces defined by consumers (not producers), concrete types by default, `context.Context` threaded everywhere, explicit error returns
 
 ---
 
@@ -55,49 +82,63 @@ Monit is a production-grade website monitoring service that continuously checks 
 ```mermaid
 graph TB
     subgraph "External"
-        USER["Client / Browser"]
-        TARGET["Monitored Websites"]
+        CLIENT["Client / Browser"]
+        TARGETS["Monitored Websites"]
     end
 
     subgraph "API Layer"
-        ROUTER["Chi Router + Middleware"]
-        AUTH["Auth Middleware (JWT)"]
-        UH["User Handler"]
-        MH["Monitor Handler"]
+        ROUTER["Chi Router"]
+        MW["Middleware Stack<br/>(Logger, RequestID, Recoverer, Timeout)"]
+        AUTH["Auth Middleware<br/>(JWT + UUID parsing)"]
+        UH["User Handler<br/>(Register, Login, Profile)"]
+        MH["Monitor Handler<br/>(CRUD, Status)"]
     end
 
     subgraph "Background Pipeline"
-        direction LR
-        SCH["Scheduler"]
-        EXEC["Executor"]
-        RP["Result Processor"]
-        ALERT["Alert Service"]
+        SCH["Scheduler<br/>(ticker + Lua scripts)"]
+        REC["Reclaimer<br/>(ticker + Lua script)"]
+        EXEC["Executor<br/>(100 worker goroutines)"]
+        SEM["HTTP Semaphore<br/>(5000 concurrent slots)"]
+        ROUTER_RP["Result Router"]
+        SW["Success Workers"]
+        FW["Failure Workers"]
+        ALERT["Alert Service<br/>(worker pool)"]
     end
 
     subgraph "Infrastructure"
-        REDIS["Redis"]
-        PG["PostgreSQL"]
+        REDIS[("Redis<br/>(Sorted Sets, Hashes, Cache)")]
+        PG[("PostgreSQL<br/>(Users, Monitors, Incidents)")]
     end
 
-    REC["Reclaimer"]
-
-    USER --> ROUTER --> AUTH
+    CLIENT --> ROUTER
+    ROUTER --> MW --> AUTH
     AUTH --> UH
     AUTH --> MH
     UH --> PG
     MH --> PG
-    MH --> REDIS
+    MH -->|"cache monitor data"| REDIS
 
-    SCH -->|jobChan| EXEC
-    EXEC -->|HTTP checks| TARGET
-    EXEC -->|resultChan| RP
-    RP -->|alertChan| ALERT
+    SCH -->|"Lua: fetch + move to inflight"| REDIS
+    SCH -->|"jobChan"| EXEC
+    REC -->|"Lua: reclaim expired inflight"| REDIS
 
-    SCH --> REDIS
-    EXEC --> REDIS
-    RP --> REDIS
-    RP --> PG
-    REC --> REDIS
+    EXEC -->|"load monitor (cache hit)"| REDIS
+    EXEC -->|"load monitor (cache miss)"| PG
+    EXEC --> SEM
+    SEM -->|"HTTP GET"| TARGETS
+    EXEC -->|"resultChan"| ROUTER_RP
+
+    ROUTER_RP -->|"successChan"| SW
+    ROUTER_RP -->|"failureChan"| FW
+
+    SW -->|"ack, store status, clear incident"| REDIS
+    SW -->|"schedule next run"| REDIS
+    SW -->|"close DB incident"| PG
+
+    FW -->|"retry / incident state"| REDIS
+    FW -->|"create incident record"| PG
+    FW -->|"alertChan"| ALERT
+    FW -->|"schedule next run"| REDIS
 ```
 
 ### Component Interaction
@@ -294,13 +335,20 @@ return items
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Scheduled: Monitor created/rescheduled
-    Scheduled --> Inflight: Lua script (atomic fetch+move)
-    Inflight --> Processing: Worker picks up job
-    Processing --> Acknowledged: Success/Failure processed
-    Acknowledged --> Scheduled: Next run scheduled
-    Inflight --> Scheduled: Visibility timeout expired (Reclaimer)
-    Processing --> Inflight: Worker crash (job stays in inflight)
+
+[*] --> Scheduled: Monitor created/rescheduled
+
+Scheduled --> Inflight: Lua script<br/>(atomic fetch+move)
+
+Inflight --> Processing: Worker picks up job
+
+Processing --> Acknowledged: Result processed
+
+Acknowledged --> Scheduled: Next run scheduled
+
+Inflight --> Scheduled: Visibility timeout expired<br/>(Reclaimer)
+
+Processing --> Inflight: Worker crash<br/>(job stays in inflight)
 ```
 
 ---
@@ -335,8 +383,7 @@ Each `close()` triggers the downstream `for range` loop to exit, ensuring every 
 
 - **Custom `apperror` package** with `Kind`, `Op`, and stack traces for structured error classification
 - **`WrapRepoError`** utility function consistently applied across all repositories, mapping `pgx.ErrNoRows` → `apperror.NotFound` and other DB errors → `apperror.Internal`
-- **Retry helper** with exponential backoff (50ms, 100ms, 150ms) for all Redis operations
-- **Worker continuity**: Executor workers use `continue` (not `return`) on errors, ensuring a single bad job doesn't kill the worker goroutine
+- **Retry helper** with exponential backoff (50ms, 100ms, 150ms) for all Redis operations.
 
 ### 4. Incident State Machine
 
@@ -359,7 +406,7 @@ The `MarkIncidentAlertedIfNotSet` method uses Redis `HSETNX` for **atomic alert 
 
 ### 1. Redis Cache on Hot Path (Eliminating DB Reads)
 
-The executor's hot path (called for every health check) loads monitor configuration. Without caching, this would be a PostgreSQL query per check — at 1M checks/hour, that's ~278 QPS just for monitor lookups.
+The executor's hot path (called for every health check) loads monitor configuration. Without caching, this would be a PostgreSQL query per check — at 1 Million checks/min, that's ~16,666 QPS just for monitor lookups.
 
 ```
 Hot path WITHOUT cache:    Executor → PostgreSQL → Execute HTTP check
@@ -368,7 +415,7 @@ Hot path WITH cache:       Executor → Redis (sub-ms) → Execute HTTP check
                                     PostgreSQL
 ```
 
-Monitor data is cached in Redis for 24 hours, serialized as `[]byte`. The `cacheMonitor()`/`getCachedMonitor()` helpers in the service layer handle marshal/unmarshal, keeping the Redis layer generic.
+Monitor data is cached in Redis for 24 hours.
 
 ### 2. HTTP Semaphore (Bounded Concurrency)
 
@@ -438,7 +485,7 @@ Multiple instances of this service can run simultaneously because:
 
 ## Engineering Challenges
 
-### Challenge 1: Making Scheduling Atomic Across Multiple Instances
+### **Challenge 1: Making Scheduling Atomic Across Multiple Instances**
 
 **Problem**: When multiple instances of the scheduler run concurrently, how do you prevent two instances from fetching the same job?
 
@@ -446,30 +493,48 @@ Multiple instances of this service can run simultaneously because:
 - Distributed locks (Redis SETNX) → too much overhead per job
 - Database-based scheduling → too slow for high throughput
 
-**Solution**: Redis Lua scripts execute atomically on the Redis server. The `fetchAndMoveToInflight` script combines `ZRANGEBYSCORE` + `ZREM` + `ZADD` into a single atomic operation. Redis guarantees no other command runs between these operations, eliminating race conditions without external coordination.
+**Solution :** <br/>
+Redis Lua scripts execute atomically on the Redis server. The `fetchAndMoveToInflight` script combines `ZRANGEBYSCORE` + `ZREM` + `ZADD` into a single atomic operation. Redis guarantees no other command runs between these operations, eliminating race conditions without external coordination.
 
-### Challenge 2: Managing Hundreds of Goroutines Without Race Conditions
+### **Challenge 2: Managing Hundreds of Goroutines Without Race Conditions**
 
 **Problem**: With 100+ executor workers, success/failure workers, alert workers, the scheduler, and the reclaimer all running concurrently, how do you prevent data races and ensure clean shutdown?
 
-**Solution**:
+**Solution :**
 - **Channels as the sole communication mechanism** — no shared mutable state between pipeline stages
 - **`sync.WaitGroup`** for coordinating goroutine lifecycle within each stage
 - **Semaphore pattern** (`chan struct{}`) to bound HTTP concurrency without mutexes
 - **Context cancellation** propagated to all goroutines for coordinated shutdown
 - **Ordered channel closure** ensuring every message is drained before shutdown (see Graceful Shutdown section above)
 
-### Challenge 3: Optimizing the Hot Path
+### **Challenge 3: Optimizing the Hot Path**
 
-**Problem**: Every monitoring check requires loading monitor configuration. At scale, this means thousands of database queries per second just for config lookups.
+**Problem**: Every monitoring check requires 
 
-**Solution**: Redis cache with 24-hour TTL. The service layer handles serialization (`json.Marshal`/`Unmarshal`), and the Redis store layer operates on raw `[]byte` — keeping infrastructure decoupled from domain types. Cache hits are sub-millisecond vs. 1-5ms for PostgreSQL queries.
+- Loading monitor configuration. 
+- Storing monitor check result.
+
+At scale, this means thousands of database queries per second , and it will blast the DB and reduce performance.
+
+**Solution :** <br/>
+Using Redis as hot storage which stores 
+- Monitor configrations with 24-hour TTL 
+- Real-time monitor status
+- Ongoing incidents
+
+This reduce the read & write latency and enhance the performance and throughtput of whole pipeline by huge margin. 
 
 ---
 
 ## Why Go
+I love this fucking language 😎
 
+Lets put my love aside and talk practically so,
 Go was chosen for this project for specific technical reasons aligned with the system's requirements:
+
+### 2. Nature of System — IO Bound Workload
+
+This system is mainly doing IO Bound tasks, like making HTTP/HTTPs calls, accessing Redis and Database, redis based scheduling, sending alerts. All these are IO operations, and very minimal CPU operations. and who can handle IO better than Golang.
 
 ### 1. Goroutines — Lightweight Concurrency at Scale
 
@@ -483,17 +548,19 @@ Go's channel primitive is the exact abstraction needed for this pipeline archite
 
 The multi-stage Dockerfile produces a **~10MB static binary** running on `distroless`. There's no runtime (JVM, V8, etc.) to warm up — the service starts in milliseconds, which is critical for container orchestration (Kubernetes liveness probes, rolling deployments).
 
-### 4. `context.Context` — First-Class Cancellation
 
-Every goroutine, Redis operation, and HTTP request respects `context.Context`. When `signal.NotifyContext` receives `SIGTERM`, cancellation propagates to all running operations simultaneously — essential for the graceful shutdown guarantee.
-
-### 5. Strong Standard Library
+### 4. Strong Standard Library
 
 `net/http`, `encoding/json`, `context`, `sync`, `errors` — Go's standard library covers HTTP clients, JSON serialization, synchronization primitives, and error handling without external dependencies. The entire HTTP executor is built on the standard `http.Client` with no additional frameworks.
 
 ### 6. Explicit Error Handling
 
-Go's explicit `if err != nil` pattern forces handling every failure path. In a monitoring system where reliability is paramount, this is an advantage over exception-based languages where errors can silently propagate.
+This is one of the best thing, I love about Go
+It's explicit `if err != nil` pattern forces handling every failure path. In a monitoring system where reliability is paramount, this is an advantage over exception-based languages where errors can silently propagate.
+
+**I can go on writing the advantages of Go and my love for this language.
+Its simiplicity, maintainablity, low-footprint, in-built and simpler concurrency model. 
+Go makes it easier to architecture complex systems like this.**
 
 ---
 
@@ -513,7 +580,7 @@ Go's explicit `if err != nil` pattern forces handling every failure path. In a m
 
 #### Go Interface Philosophy
 
-Interfaces are discovered, not designed upfront. They exist only where there are multiple consumers or testability needs:
+Interfaces are discovered, not designed upfront. Make interfaces when you really need them.
 
 ```go
 // Defined by the CONSUMER (executor), not the producer (monitor service)
@@ -550,33 +617,25 @@ This reduced repository code by **~40%** while making error handling more consis
 
 ### Module Boundaries
 
-```
-┌─────────────────────────────────────────────────────┐
-│                     cmd/api                          │  Entry point, signal handling
-├─────────────────────────────────────────────────────┤
-│                    config                            │  Viper + validation
-├─────────────────────────────────────────────────────┤
-│               internals/app                          │  DI Container + Router
-├───────────┬───────────┬───────────┬─────────────────┤
-│  user     │  monitor  │ scheduler │  executor       │  Domain modules
-│  handler  │  handler  │ scheduler │  executor       │
-│  service  │  service  │ reclaimer │                  │
-│  repo     │  repo     │ lua_scripts                  │
-│  dto      │  cache    │           │                  │
-├───────────┴───────────┴───────────┤  result          │
-│         middleware                │  processor       │
-│  auth, authorization, metrics    │  success_worker  │
-│  logger                         │  failure_worker  │
-├─────────────────────────────────┤  repository      │
-│         security                │                  │
-│  tokenizer, hasher             ├─────────────────┤
-│                                │  alert           │
-├────────────────────────────────┤  service         │
-│               pkg (shared)      ├─────────────────┤
-│  apperror  │  db       │ redisstore               │
-│  logger    │  httpclient│ utils                    │
-└────────────┴───────────┴──────────────────────────┘
-```
+| Module | Layer | Responsibility |
+|---|---|---|
+| `cmd/api` | Entry point | Bootstraps the application, loads config, initializes all dependencies, starts background workers, runs the HTTP server, and handles OS signal-based graceful shutdown |
+| `config` | Configuration | Loads YAML config via Viper with environment variable overrides, sets sensible defaults, and validates all fields using struct tags before the app starts |
+| `internals/app` | Orchestration | Wires all dependencies together in a `Container` struct (dependency injection), registers Chi routes with middleware, and implements ordered shutdown of channels and workers |
+| `internals/middleware` | HTTP middleware | Provides authentication (JWT parsing + UUID context storage), authorization (role-based access control), structured request logging, request ID propagation, and pluggable metrics recording |
+| `internals/security` | Security | Handles JWT token generation and validation (HS256), and password hashing/comparison using Argon2id |
+| `internals/modules/user` | Domain — User | Manages user registration (with Argon2id hashing), login (with JWT issuance), and profile retrieval. Owns its own handler, service, repository, DTOs, and route definitions |
+| `internals/modules/monitor` | Domain — Monitor | Handles monitor CRUD operations, Redis caching (with JSON marshal/unmarshal in the service layer), and scheduling of new monitors. Defines the `Cache` interface consumed by the service |
+| `internals/modules/scheduler` | Domain — Scheduling | Runs a ticker-based loop that fetches due monitoring jobs from Redis using atomic Lua scripts and dispatches them to the executor via `jobChan`. Includes the Reclaimer for recovering stalled inflight jobs |
+| `internals/modules/executor` | Domain — Execution | Runs a pool of worker goroutines that load monitor config (cache-first), execute HTTP health checks through an HTTP semaphore, classify errors (DNS, timeout, network), and emit results to `resultChan` |
+| `internals/modules/result` | Domain — Result Processing | Routes results to success/failure worker pools. Success workers clear incidents and reschedule. Failure workers handle retries, increment incidents, create DB records, and trigger alerts via `alertChan` |
+| `internals/modules/alert` | Domain — Alerting | Consumes alert events from `alertChan` using a worker pool and dispatches notifications (e.g., email) |
+| `pkg/apperror` | Shared — Errors | Defines the structured `Error` type with `Kind` (NotFound, Internal, Unauthorised, etc.), `Op` (operation trace), and `Message`. Maps error kinds to HTTP status codes |
+| `pkg/db` | Shared — Database | Manages the pgx connection pool initialization, and contains all sqlc-generated type-safe query functions for users, monitors, incidents, and alerts |
+| `pkg/redisstore` | Shared — Redis | Encapsulates all Redis operations organized by domain: scheduling (sorted sets), monitor caching (`[]byte`), incident tracking (hashes), retry counters, status storage, and a generic retry helper with backoff |
+| `pkg/httpclient` | Shared — HTTP | Provides a pre-configured `http.Client` with sensible timeouts and transport settings for outbound health checks |
+| `pkg/logger` | Shared — Logging | Initializes zerolog with JSON output, log level configuration, and caller information |
+| `pkg/utils` | Shared — Utilities | Contains `WrapRepoError` (centralized repo error handling), JSON response helpers, typed response message constants, and string converters |
 
 ### Error Handling Architecture
 
@@ -614,31 +673,86 @@ project-k/
 │   │   ├── metrics.go             # Pluggable metrics via MetricsRecorder interface
 │   │   └── types.go               # Middleware type alias
 │   ├── modules/
-│   │   ├── user/                  # User domain: register, login, profile
-│   │   ├── monitor/               # Monitor CRUD, caching, scheduling
-│   │   ├── scheduler/             # Job scheduling with Lua scripts
-│   │   ├── executor/              # HTTP health checks with semaphore
-│   │   ├── result/                # Result processing pipeline
-│   │   └── alert/                 # Alert dispatch
+│   │   ├── user/
+│   │   │   ├── domain.go          # User entity and CreateUserCmd
+│   │   │   ├── dto.go             # RegisterRequest, LogInRequest, response types
+│   │   │   ├── handler.go         # HTTP handlers: Register, LogIn, GetProfile
+│   │   │   ├── repository.go      # PostgreSQL queries via sqlc
+│   │   │   ├── routes.go          # Chi route definitions for /users
+│   │   │   └── service.go         # Business logic: hashing, token generation, profile
+│   │   ├── monitor/
+│   │   │   ├── cache.go           # Cache interface (GetMonitor, SetMonitor, DelMonitor, etc.)
+│   │   │   ├── domain.go          # Monitor entity and CreateMonitorCmd
+│   │   │   ├── dto.go             # CreateMonitorRequest, UpdateMonitorRequest, responses
+│   │   │   ├── handler.go         # HTTP handlers: Create, Get, List, UpdateStatus
+│   │   │   ├── repository.go      # PostgreSQL queries via sqlc
+│   │   │   ├── routes.go          # Chi route definitions for /monitors
+│   │   │   └── service.go         # Business logic: CRUD, caching, scheduling helpers
+│   │   ├── scheduler/
+│   │   │   ├── lua_scripts.go     # 3 Lua scripts: fetchDue, fetchAndMoveToInflight, reclaim
+│   │   │   ├── models.go          # JobPayload struct
+│   │   │   ├── reclaimer.go       # Background ticker that reclaims stalled inflight jobs
+│   │   │   └── scheduler.go       # Background ticker that dispatches due jobs to jobChan
+│   │   ├── executor/
+│   │   │   ├── executor.go        # Worker pool, HTTP semaphore, health check execution
+│   │   │   └── models.go          # HTTPResult struct with zerolog marshaling
+│   │   ├── result/
+│   │   │   ├── processor.go       # Result router + worker pool lifecycle management
+│   │   │   ├── success_worker.go  # Clears incidents, stores status, schedules next run
+│   │   │   ├── failure_worker.go  # Retry logic, incident creation, alert triggering
+│   │   │   ├── repository.go      # MonitorIncident PostgreSQL queries
+│   │   │   └── types.go           # MonitorService interface for result processing
+│   │   └── alert/
+│   │       ├── models.go          # AlertEvent struct
+│   │       └── service.go         # Alert worker pool, email dispatch
 │   └── security/
 │       ├── tokenizer.go           # JWT generation + validation (HS256)
-│       └── hasher.go              # Argon2id password hashing
+│       ├── hasher.go              # Argon2id password hashing + comparison
+│       └── types.go               # RequestClaims (JWT payload struct)
 ├── pkg/
-│   ├── apperror/                  # Structured error types with Kind classification
-│   ├── db/                        # pgx connection pool + sqlc generated queries
-│   ├── redisstore/                # All Redis operations organized by domain
-│   ├── httpclient/                # Configured HTTP client
-│   ├── logger/                    # Zerolog initialization
-│   └── utils/                     # WrapRepoError, JSON helpers, constants
+│   ├── apperror/
+│   │   ├── apperror.go            # Error struct with Kind, Op, Message, wrapped Err
+│   │   ├── kind.go                # Error kinds: NotFound, Internal, Unauthorised, etc.
+│   │   ├── http.go                # Maps error Kind → HTTP status code
+│   │   └── code.go                # Reserved for future error codes
+│   ├── db/
+│   │   ├── dbConn.go              # pgx connection pool initialization + health check
+│   │   ├── db.go                  # sqlc Queries struct
+│   │   ├── models.go              # sqlc generated Go types for all tables
+│   │   ├── users.sql.go           # sqlc generated: CreateUser, GetUserByID, etc.
+│   │   ├── monitors.sql.go        # sqlc generated: CreateMonitor, GetMonitor, etc.
+│   │   ├── monitor_incidents.sql.go  # sqlc generated: CreateIncident, CloseIncident
+│   │   └── alerts.sql.go          # sqlc generated: alert queries
+│   ├── redisstore/
+│   │   ├── client.go              # Redis client initialization + connection config
+│   │   ├── scheduler.go           # Schedule, PopDue, FetchAndMoveToInflight, AckJob
+│   │   ├── reclaimer.go           # ReclaimMonitors (Lua script execution)
+│   │   ├── monitor.go             # SetMonitor, GetMonitor, DelMonitor ([]byte cache)
+│   │   ├── status.go              # StoreStatus, GetStatus, DelStatus
+│   │   ├── incident.go            # IncrementIncident, ClearIncident, MarkAlerted, etc.
+│   │   ├── retry_counter.go       # IncrementRetry, ClearRetry (with TTL)
+│   │   ├── retry.go               # Generic retry helper with exponential backoff
+│   │   └── schema.md              # Redis key schema documentation
+│   ├── httpclient/
+│   │   └── httpclient.go          # Pre-configured http.Client with timeouts
+│   ├── logger/
+│   │   └── logger.go              # Zerolog initialization with JSON output
+│   └── utils/
+│       ├── errorbuilder.go        # WrapRepoError: centralized repository error handling
+│       ├── response.go            # WriteJSON, WriteError, FromAppError helpers
+│       ├── constants.go           # Typed ResponseMessage constants
+│       └── converters.go          # String/type conversion utilities
 ├── migration/                     # Goose SQL migrations
-├── sqlc/                          # SQL query definitions for sqlc
-├── Dockerfile                     # Multi-stage build → distroless
-└── env.yaml                       # Configuration file
+├── sqlc/                          # SQL query definitions for sqlc code generation
+├── Dockerfile                     # Multi-stage build → distroless (~10MB image)
+└── env.yaml                       # Configuration file (YAML)
 ```
 
 ---
 
-## Tech Stack
+## Tools and Packages 
+
+I also try to minimize it.
 
 | Layer | Technology | Rationale |
 |---|---|---|
@@ -661,40 +775,70 @@ project-k/
 All system parameters are configurable via `env.yaml` with environment variable overrides:
 
 ```yaml
-env: production
-service_name: monitor-service
-port: 8080
+# ─── General ───────────────────────────────────────────
+env: production                     # Environment: development | staging | production
+service_name: monitor-service       # Service identifier for logging
+port: 8080                          # HTTP server port
 
+# ─── Authentication ───────────────────────────────────
 auth:
-  secret: "your-jwt-secret"
-  token_ttl: 30m
+  secret: "your-jwt-secret"         # HMAC-SHA256 signing key for JWT tokens
+  token_ttl: 30m                    # Access token time-to-live
 
+# ─── Pipeline Channels ───────────────────────────────
 app:
-  job_channel_size: 1000      # Buffer between scheduler and executor
-  result_channel_size: 1000   # Buffer between executor and result processor
-  alert_channel_size: 100     # Buffer between result processor and alert service
+  job_channel_size: 1000            # Buffer between Scheduler → Executor
+  result_channel_size: 1000         # Buffer between Executor → Result Processor
+  alert_channel_size: 500           # Buffer between Result Processor → Alert Service
 
+# ─── Scheduler ────────────────────────────────────────
 scheduler:
-  interval: 1s                # How often to poll Redis for due jobs
-  batch_size: 500             # Max jobs per poll cycle
-  visibility_timeout: 30s     # How long before inflight jobs are reclaimed
+  interval: 1s                      # Ticker interval: how often to poll Redis for due jobs
+  batch_size: 10                    # Max jobs fetched per tick via Lua script
+  visibility_timeout: 30s           # Inflight expiry: after this, Reclaimer moves job back
 
+# ─── Reclaimer ────────────────────────────────────────
 reclaimer:
-  interval: 5s                # How often to check for stalled jobs
-  limit: 100                  # Max jobs to reclaim per cycle
+  interval: 5s                      # How often to scan for stalled inflight jobs
+  limit: 10                         # Max jobs to reclaim per cycle
 
+# ─── Executor ─────────────────────────────────────────
 executor:
-  worker_count: 100           # Number of goroutines reading from jobChan
-  http_semaphore_count: 5000  # Max concurrent HTTP connections
+  worker_count: 100                 # Goroutines reading from jobChan
+  http_semaphore_count: 500         # Max concurrent outbound HTTP connections
 
-result_processor:
-  success_worker_count: 10
-  success_channel_size: 500
-  failure_worker_count: 10
-  failure_channel_size: 500
-
+# ─── Alert Service ────────────────────────────────────
 alert:
-  worker_count: 5
+  worker_count: 50                  # Goroutines processing alert events
+  owner_email: "you@example.com"    # Sender email for alert notifications
+  access_key: "your-email-api-key"  # API key for email provider
+
+# ─── Result Processor ────────────────────────────────
+result_processor:
+  success_worker_count: 50          # Goroutines handling successful check results
+  success_channel_size: 100         # Buffer for successChan (router → success workers)
+  failure_worker_count: 10          # Goroutines handling failed check results
+  failure_channel_size: 50          # Buffer for failureChan (router → failure workers)
+
+# ─── Redis ────────────────────────────────────────────
+redis:
+  url: "redis://localhost:6379"     # Redis connection URL
+  dial_timeout: 5s                  # Timeout for establishing new connections
+  read_timeout: 3s                  # Timeout for Redis read operations
+  write_timeout: 3s                 # Timeout for Redis write operations
+  pool_size: 20                     # Maximum number of connections in the pool
+  min_idle_conns: 5                 # Pre-warmed idle connections kept ready
+  conn_max_lifetime: 10m            # Max time a connection can be reused
+  conn_max_idle_time: 5m            # Max time a connection can sit idle before closing
+
+# ─── PostgreSQL ───────────────────────────────────────
+db:
+  url: "your-db-url"
+  max_open_conns: 50                # Max connections in the pgx pool
+  min_idle_conns: 5                 # Pre-warmed idle connections
+  conn_max_lifetime: 1h             # Max time a connection can be reused
+  conn_max_idle_time: 30m           # Max time a connection can sit idle
+  health_timeout: 5s                # Timeout for the DB health ping on startup
 ```
 
 ---
@@ -749,30 +893,28 @@ erDiagram
 ### Prerequisites
 
 - Go 1.24+
+- Goose ( to apply migrations)
 - PostgreSQL 15+
 - Redis 7+
 - Docker (optional)
 
-### Run Locally
+### Build Locally
 
 ```bash
 # 1. Clone
 git clone https://github.com/ashishDevv/monit.git && cd monit
 
-# 2. Configure
+# 2. Configure env 
 cp env.yaml.example env.yaml  # Edit with your DB/Redis URLs
 
-# 3. Run migrations
+# 3. Run migrations - goose should be installed on your system
 goose -dir migration postgres "your_connection_string" up
-
-# 4. Generate SQL (if modifying queries)
-sqlc generate
 
 # 5. Run
 go run cmd/api/main.go
 ```
 
-### Docker
+### If you don't want headache, and docker is installed on your system
 
 ```bash
 docker build -t monit .
