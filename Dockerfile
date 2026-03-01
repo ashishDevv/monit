@@ -1,7 +1,7 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install git (if you use private modules)
-RUN apk add --no-cache git
+# RUN apk add --no-cache git
 
 WORKDIR /app
 
@@ -18,8 +18,8 @@ COPY cmd ./cmd
 # Make a build directory
 RUN mkdir build
 
-# Build binary (static)  and put binary in build folder
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /app/build/app ./cmd/api/main.go   
+# Build binary (static) and put binary in build folder
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o /app/build/app ./cmd/api/main.go
 
 # ---------- Runtime Stage ----------
 FROM gcr.io/distroless/base-debian12

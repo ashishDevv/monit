@@ -1,0 +1,95 @@
+services:
+  # ─── Database Migrations (runs once, then exits) ────
+  migrate:
+    image: ghcr.io/pressly/goose:latest
+    container_name: monit-migrate
+    env_file:
+      - .env
+    volumes:
+      - ./migration:/migration:ro            # Mount SQL files from host (read-only)
+    command: ["-dir", "/migration", "postgres", "${DB_URL}", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - monit-network
+
+  # ─── Application ──────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: monit-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env                              # Secrets: DB_URL, REDIS_URL, AUTH_SECRET, etc.
+    volumes:
+      - ./env.yaml:/app/env.yaml:ro       # Non-sensitive config (read-only mount)
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - monit-network
+    healthcheck:
+      test: ["/bin/true"]                 # distroless has no curl/wget
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ─── PostgreSQL ───────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: monit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - monit-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Redis ────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: monit-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - monit-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+# ─── Volumes ──────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────
+networks:
+  monit-network:
+    driver: bridge

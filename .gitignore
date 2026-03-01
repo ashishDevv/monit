@@ -1,11 +1,19 @@
 # for golang project
 
+# Ignore all markdown files
+*.md
+
+# But allow these specific ones
+!README.md
+!TODO.md
+
+.env
 env.yaml
+config.yaml
 .zed/
+deploy/
 keys/
 docs/
-MVC/
-.env
 *.log
 log.json
 vendor/
